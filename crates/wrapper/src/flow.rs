@@ -21,7 +21,12 @@ const EXPIRY_MARGIN_SECS: u64 = 300;
 /// # Errors
 /// Invalid hash, state dir or key failure, sponsor unreachable / no
 /// capability within the poll timeout, or `decdn bundle pull` failing.
-pub async fn pull(hash: &str, output: &Path, cfg: &WrapperConfig) -> anyhow::Result<()> {
+pub async fn pull(
+    hash: &str,
+    output: &Path,
+    namespace: Option<u64>,
+    cfg: &WrapperConfig,
+) -> anyhow::Result<()> {
     let hash = session::normalize_hash(hash)?;
     let api = Api::new(cfg.gateway_base.clone());
 
@@ -54,6 +59,7 @@ pub async fn pull(hash: &str, output: &Path, cfg: &WrapperConfig) -> anyhow::Res
     let args = PullArgs {
         hash,
         output: output.to_path_buf(),
+        namespace,
         capability_file: session.capability_path(),
         keystore: session.keystore_path(),
         password_file: session.password_path(),

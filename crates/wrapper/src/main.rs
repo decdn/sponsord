@@ -27,6 +27,13 @@ enum Command {
         /// Directory the bundle's files are written under.
         #[arg(short, long, default_value = ".")]
         output: PathBuf,
+
+        /// Namespace the bundle is published under. Lets a node that has not
+        /// cached it pull from that namespace's origins; without it the bundle
+        /// is served from caches only. Never changes which bytes you get: they
+        /// are verified against the hash either way.
+        #[arg(long, value_name = "ID", value_parser = clap::value_parser!(u64).range(1..))]
+        namespace: Option<u64>,
     },
 }
 
@@ -43,7 +50,11 @@ async fn main() -> ExitCode {
     };
 
     let result = match &cli.command {
-        Command::Pull { hash, output } => flow::pull(hash, output, &cfg).await,
+        Command::Pull {
+            hash,
+            output,
+            namespace,
+        } => flow::pull(hash, output, *namespace, &cfg).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

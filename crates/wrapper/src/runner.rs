@@ -22,6 +22,9 @@ pub struct PullArgs {
     pub hash: String,
     /// `-o`/`--output`: directory the bundle's files are written under.
     pub output: PathBuf,
+    /// `--namespace`: the namespace the bundle is published under, so a
+    /// cache-missing node can pull from its origins (ADR 002).
+    pub namespace: Option<u64>,
     /// `--capability-file`: the sponsor-issued `dcap1:` token, read from a
     /// file to keep it off the process table.
     pub capability_file: PathBuf,
@@ -69,6 +72,10 @@ impl PullArgs {
             "--chain-id".into(),
             self.chain_id.to_string().into(),
         ];
+        if let Some(namespace) = self.namespace {
+            args.push("--namespace".into());
+            args.push(namespace.to_string().into());
+        }
         if let Some(addr) = &self.capacity_bond_address {
             args.push("--capacity-bond-address".into());
             args.push(addr.clone().into());
@@ -106,6 +113,7 @@ mod tests {
         PullArgs {
             hash: "ab".repeat(32),
             output: PathBuf::from("out"),
+            namespace: Some(1),
             capability_file: PathBuf::from("/s/capability"),
             keystore: PathBuf::from("/s/keystore.json"),
             password_file: PathBuf::from("/s/password"),
@@ -142,6 +150,7 @@ mod tests {
             "0x02"
         );
         assert!(!args.iter().any(|a| a == "--capability"));
+        assert_eq!(value_after(&args, "--namespace").unwrap(), "1");
         assert!(!args.iter().any(|a| a == "--slash-judge-address"));
     }
 }
