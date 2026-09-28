@@ -6,6 +6,7 @@
 //! unchanged; this module only builds its argument vector.
 
 use std::ffi::OsString;
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 
@@ -23,8 +24,9 @@ pub struct PullArgs {
     /// `-o`/`--output`: directory the bundle's files are written under.
     pub output: PathBuf,
     /// `--namespace`: the namespace the bundle is published under, so a
-    /// cache-missing node can pull from its origins (ADR 002).
-    pub namespace: Option<u64>,
+    /// cache-missing node can pull from its origins (ADR 002). Namespace 0
+    /// means "no namespace" to `decdn`, so the type rules it out.
+    pub namespace: Option<NonZeroU64>,
     /// `--capability-file`: the sponsor-issued `dcap1:` token, read from a
     /// file to keep it off the process table.
     pub capability_file: PathBuf,
@@ -113,7 +115,7 @@ mod tests {
         PullArgs {
             hash: "ab".repeat(32),
             output: PathBuf::from("out"),
-            namespace: Some(1),
+            namespace: NonZeroU64::new(1),
             capability_file: PathBuf::from("/s/capability"),
             keystore: PathBuf::from("/s/keystore.json"),
             password_file: PathBuf::from("/s/password"),

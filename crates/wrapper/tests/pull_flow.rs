@@ -8,6 +8,7 @@
     clippy::indexing_slicing
 )]
 
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -112,7 +113,7 @@ async fn success_runs_bundle_pull_and_discards_state() {
     flow::pull(
         &format!("b3:{HASH}"),
         &tmp.path().join("out"),
-        Some(1),
+        NonZeroU64::new(1),
         &cfg,
     )
     .await

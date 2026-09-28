@@ -4,6 +4,7 @@
 //! keeps it, so re-running the same command resumes without a new captcha.
 
 use std::io::IsTerminal;
+use std::num::NonZeroU64;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -24,7 +25,7 @@ const EXPIRY_MARGIN_SECS: u64 = 300;
 pub async fn pull(
     hash: &str,
     output: &Path,
-    namespace: Option<u64>,
+    namespace: Option<NonZeroU64>,
     cfg: &WrapperConfig,
 ) -> anyhow::Result<()> {
     let hash = session::normalize_hash(hash)?;

@@ -1,6 +1,7 @@
 //! `decdn-sponsored`: download a content-addressed bundle through the
 //! sponsord gateway, with no wallet. See `flow::pull`.
 
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -32,8 +33,8 @@ enum Command {
         /// cached it pull from that namespace's origins; without it the bundle
         /// is served from caches only. Never changes which bytes you get: they
         /// are verified against the hash either way.
-        #[arg(long, value_name = "ID", value_parser = clap::value_parser!(u64).range(1..))]
-        namespace: Option<u64>,
+        #[arg(long, value_name = "ID")]
+        namespace: Option<NonZeroU64>,
     },
 }
 
