@@ -77,18 +77,25 @@ pub async fn submit(State(state): State<AppState>, Json(req): Json<FundRequest>)
         Err(_) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     }
 
-    let (token, expiry) = match state.issuer.issue(client, now) {
+    let (spending_cap, ttl_secs) = match state.issuer.terms(None, None) {
+        Ok(v) => v,
+        Err(_) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    };
+    let signed = match state
+        .issuer
+        .sign(client, spending_cap, now.saturating_add(ttl_secs))
+    {
         Ok(v) => v,
         Err(_) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
     let rec = GrantRecord {
-        spending_cap: state.cfg.capability_cap.0,
-        expiry,
+        spending_cap: signed.spending_cap,
+        expiry: signed.expiry,
         issued_unix: now,
-        token: token.clone(),
+        token: signed.token.clone(),
     };
     if state.store.put_grant(client, &rec).is_err() {
         return err_json(StatusCode::INTERNAL_SERVER_ERROR, "internal");
     }
-    Json(json!({ "token": token })).into_response()
+    Json(json!({ "token": signed.token })).into_response()
 }
