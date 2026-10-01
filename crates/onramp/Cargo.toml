@@ -28,3 +28,6 @@ tower = { version = "0.5", features = ["util"] }
 # Used by `test_support.rs` (pulled into the integration-test binaries via
 # `#[path]`, not part of the shipped lib/bin) and by the store tests.
 tempfile = "3"
+sponsord = { path = "../daemon" }
+sponsord-core = { path = "../core", features = ["test-support"] }
+decdn-incentive.workspace = true
