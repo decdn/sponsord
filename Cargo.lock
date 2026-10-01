@@ -7812,6 +7812,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "sponsord"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "axum",
+ "decdn-incentive",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sponsord-core",
+ "subtle",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sponsord-core"
 version = "0.1.0"
 dependencies = [
