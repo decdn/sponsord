@@ -70,9 +70,9 @@ jobs:
           - { package: decdn-sponsored, binary: decdn-sponsored, target: x86_64-pc-windows-msvc, runner: windows-latest }
           # Cross-compiled on the x64 runner with the MSVC ARM64 toolchain.
           - { package: decdn-sponsored, binary: decdn-sponsored, target: aarch64-pc-windows-msvc, runner: windows-latest }
-          # The gateway itself, for devops to deploy.
-          - { package: sponsord, binary: sponsord, target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04 }
-          - { package: sponsord, binary: sponsord, target: aarch64-unknown-linux-gnu, runner: ubuntu-22.04-arm }
+          # The onramp frontend, for devops to deploy.
+          - { package: sponsord-onramp, binary: sponsord-onramp, target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04 }
+          - { package: sponsord-onramp, binary: sponsord-onramp, target: aarch64-unknown-linux-gnu, runner: ubuntu-22.04-arm }
     steps:
       - uses: actions/checkout@v4
         with:

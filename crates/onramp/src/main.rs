@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use sponsord::config::ServerConfig;
-use sponsord::{http, pool_watch, state};
+use sponsord_onramp::config::ServerConfig;
+use sponsord_onramp::{http, pool_watch, state};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     ));
     let app = http::router(app_state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    tracing::info!(%bind, "sponsord listening");
+    tracing::info!(%bind, "sponsord-onramp listening");
     axum::serve(listener, app).await?;
     Ok(())
 }

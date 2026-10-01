@@ -14,13 +14,13 @@ use alloy::primitives::{Address, B256};
 use alloy::signers::local::PrivateKeySigner;
 use async_trait::async_trait;
 
-use sponsord::captcha::CaptchaVerifier;
-use sponsord::config::{ReleasePin, ServerConfig};
-use sponsord::issuer::Issuer;
-use sponsord::money::MicroUsdc;
-use sponsord::state::AppState;
-use sponsord::store::Store;
-use sponsord::treasury::Treasury;
+use sponsord_onramp::captcha::CaptchaVerifier;
+use sponsord_onramp::config::{ReleasePin, ServerConfig};
+use sponsord_onramp::issuer::Issuer;
+use sponsord_onramp::money::MicroUsdc;
+use sponsord_onramp::state::AppState;
+use sponsord_onramp::store::Store;
+use sponsord_onramp::treasury::Treasury;
 
 pub use sponsord_core::test_support::FakeTreasury;
 

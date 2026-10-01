@@ -20,7 +20,7 @@ use serde_json::Value;
 #[tokio::test]
 async fn healthz_ok() {
     let state = app_state_with_fakes();
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
     let resp = app
         .oneshot(Request::get("/healthz").body(Body::empty()).expect("req"))
         .await
@@ -44,7 +44,7 @@ fn fund_body() -> String {
 #[tokio::test]
 async fn fund_issues_token_then_capability_returns_same_token() {
     let state = test_support::app_state_with_fakes();
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
 
     let resp = app
         .clone()
@@ -97,7 +97,7 @@ async fn fund_issues_token_then_capability_returns_same_token() {
 #[tokio::test]
 async fn capability_204_before_issue() {
     let state = test_support::app_state_with_fakes();
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
     let resp = app
         .oneshot(
             Request::get(format!("/capability?client={CLIENT}"))
@@ -115,7 +115,7 @@ async fn fund_rejects_bad_captcha_403() {
         captcha_passes: false,
         ..FakeOptions::default()
     });
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
     let resp = app
         .oneshot(
             Request::post("/fund")
@@ -135,7 +135,7 @@ async fn fund_rejects_bad_captcha_403() {
 #[tokio::test]
 async fn fund_page_embeds_sitekey_and_client_and_rejects_non_hex() {
     let state = test_support::app_state_with_fakes();
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
 
     let resp = app
         .clone()
@@ -168,8 +168,8 @@ async fn fund_page_embeds_sitekey_and_client_and_rejects_non_hex() {
 #[tokio::test]
 async fn expired_grant_is_treated_as_absent_and_reissued() {
     use alloy::primitives::Address;
-    use sponsord::money::MicroUsdc;
-    use sponsord::store::GrantRecord;
+    use sponsord_onramp::money::MicroUsdc;
+    use sponsord_onramp::store::GrantRecord;
     use std::str::FromStr;
 
     let state = test_support::app_state_with_fakes();
@@ -185,7 +185,7 @@ async fn expired_grant_is_treated_as_absent_and_reissued() {
     };
     state.store.put_grant(signer, &stale).expect("seed grant");
 
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
 
     // GET /capability treats the expired grant as absent.
     let resp = app
@@ -221,7 +221,7 @@ async fn expired_grant_is_treated_as_absent_and_reissued() {
 #[tokio::test]
 async fn decdn_sh_templated_with_payment_pool() {
     let state = test_support::app_state_with_fakes();
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
     let resp = app
         .oneshot(Request::get("/decdn.sh").body(Body::empty()).expect("req"))
         .await
@@ -257,7 +257,7 @@ fn assert_pins_releases(body: &str) {
 #[tokio::test]
 async fn decdn_ps1_templated_with_payment_pool() {
     let state = test_support::app_state_with_fakes();
-    let app = sponsord::http::router(state);
+    let app = sponsord_onramp::http::router(state);
     let resp = app
         .oneshot(Request::get("/decdn.ps1").body(Body::empty()).expect("req"))
         .await

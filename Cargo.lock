@@ -7812,7 +7812,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "sponsord"
+name = "sponsord-core"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "async-trait",
+ "decdn-client",
+ "decdn-e2e",
+ "decdn-incentive",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sponsord-onramp"
 version = "0.1.0"
 dependencies = [
  "alloy",
@@ -7834,21 +7849,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wiremock",
-]
-
-[[package]]
-name = "sponsord-core"
-version = "0.1.0"
-dependencies = [
- "alloy",
- "anyhow",
- "async-trait",
- "decdn-client",
- "decdn-e2e",
- "decdn-incentive",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
 ]
 
 [[package]]
