@@ -15,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
     let watch_interval = Duration::from_secs(cfg.pool_watch_interval_secs);
     let app_state = state::build(cfg).await?;
     tokio::spawn(pool_watch::run(
-        app_state.clone(),
+        app_state.treasury.clone(),
         watch_interval,
         low_water,
         refill,

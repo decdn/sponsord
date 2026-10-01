@@ -7,16 +7,13 @@ rust-version = "1.95"
 [lints]
 workspace = true
 
-[features]
-anvil-e2e = []
-
 [dependencies]
 tokio.workspace = true
 anyhow.workspace = true
 alloy.workspace = true
 decdn-client.workspace = true
 decdn-incentive.workspace = true
-decdn-common.workspace = true
+sponsord-core = { path = "../core" }
 redb = "4"
 reqwest = { version = "0.12", features = ["json"] }
 serde.workspace = true
@@ -31,11 +28,7 @@ hex = "0.4"
 wiremock = "0.6"
 serial_test = "3"
 tower = { version = "0.5", features = ["util"] }
-decdn-e2e = { path = "../../../decdn/crates/e2e", features = ["anvil-e2e"] }
+sponsord-core = { path = "../core", features = ["test-support"] }
 # Used by `test_support.rs` (pulled into the integration-test binary via
 # `#[path]` from `tests/http_contract.rs`, not part of the shipped lib/bin).
 tempfile = "3"
-# Pinned to the same major as decdn's workspace (`decdn/Cargo.toml`) so
-# `iroh::SecretKey` here is the identical type `ChainFixture::onboard_operator`
-# expects — needed only to build the provider's node identity for the fixture.
-iroh = "1"
