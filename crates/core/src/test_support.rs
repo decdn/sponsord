@@ -9,18 +9,23 @@
     clippy::indexing_slicing
 )]
 
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use alloy::primitives::{Address, B256};
 use async_trait::async_trait;
 
 use crate::money::MicroUsdc;
-use crate::treasury::Treasury;
+use crate::treasury::{Authorization, Treasury};
 
-/// In-memory pool treasury: fixed owner, a mutable remaining balance.
+/// In-memory pool treasury: fixed owner, a mutable remaining balance, and a
+/// settable per-signer registration map.
 pub struct FakeTreasury {
     owner: Address,
     remaining: Mutex<u64>,
+    registrations: Mutex<HashMap<Address, Authorization>>,
+    fail_authorization: AtomicBool,
 }
 
 impl FakeTreasury {
@@ -29,7 +34,19 @@ impl FakeTreasury {
         Self {
             owner,
             remaining: Mutex::new(remaining),
+            registrations: Mutex::new(HashMap::new()),
+            fail_authorization: AtomicBool::new(false),
         }
+    }
+
+    /// Record `signer` as registered on-chain with `auth`.
+    pub fn register(&self, signer: Address, auth: Authorization) {
+        self.registrations.lock().unwrap().insert(signer, auth);
+    }
+
+    /// Make every `authorization` read fail (an RPC outage).
+    pub fn fail_authorization_reads(&self, fail: bool) {
+        self.fail_authorization.store(fail, Ordering::SeqCst);
     }
 }
 
@@ -55,5 +72,16 @@ impl Treasury for FakeTreasury {
     }
     async fn pool_owner(&self, _pool_id: B256) -> anyhow::Result<Address> {
         Ok(self.owner)
+    }
+    async fn authorization(
+        &self,
+        _pool_id: B256,
+        signer: Address,
+    ) -> anyhow::Result<Option<Authorization>> {
+        anyhow::ensure!(
+            !self.fail_authorization.load(Ordering::SeqCst),
+            "authorization read failed"
+        );
+        Ok(self.registrations.lock().unwrap().get(&signer).copied())
     }
 }

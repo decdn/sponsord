@@ -1,6 +1,6 @@
 //! `Treasury`: the on-chain `PaymentPool` operations the sponsor needs — read
-//! the pool's remaining balance, top it up from the hot wallet, and read its
-//! owner (a boot-time sanity check). Mocked by `FakeTreasury` in the HTTP
+//! the pool's remaining balance, top it up from the hot wallet, read its
+//! owner (a boot-time sanity check), and read a signer's registration. Mocked by `FakeTreasury` in the HTTP
 //! contract tests; backed by `DecdnTreasury` in production.
 
 use alloy::primitives::{Address, B256, U256};
@@ -12,6 +12,24 @@ use decdn_client::provider::build_provider;
 use decdn_incentive::payment_pool::PaymentPool;
 
 use crate::money::MicroUsdc;
+
+/// A signer's registration under a pool: the terms fixed by the first
+/// capability redeemed for it (`PaymentPool.authorized[poolId][signer]`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Authorization {
+    pub spending_cap: u64,
+    pub expiry: u64,
+}
+
+/// The contract's unregistered state is a zero cap and zero expiry
+/// (`PaymentPool._registerCapability`); anything else is a registration.
+#[must_use]
+pub fn registration(cap: u64, expiry: u64) -> Option<Authorization> {
+    (cap != 0 || expiry != 0).then_some(Authorization {
+        spending_cap: cap,
+        expiry,
+    })
+}
 
 #[async_trait]
 pub trait Treasury: Send + Sync {
@@ -28,6 +46,14 @@ pub trait Treasury: Send + Sync {
     /// The pool's on-chain `owner` (used once at boot to confirm this wallet
     /// owns the configured pool).
     async fn pool_owner(&self, pool_id: B256) -> anyhow::Result<Address>;
+
+    /// `signer`'s registration under `pool_id`, or `None` if no capability
+    /// has been redeemed for it yet.
+    async fn authorization(
+        &self,
+        pool_id: B256,
+        signer: Address,
+    ) -> anyhow::Result<Option<Authorization>>;
 }
 
 #[derive(Clone, Debug)]
@@ -108,5 +134,43 @@ impl<P: Provider + Clone + 'static> Treasury for DecdnTreasury<P> {
             .await
             .map_err(|e| anyhow::anyhow!("getPool({pool_id}): {e}"))?;
         Ok(pool.owner)
+    }
+
+    async fn authorization(
+        &self,
+        pool_id: B256,
+        signer: Address,
+    ) -> anyhow::Result<Option<Authorization>> {
+        let a = self
+            .contract
+            .getAuthorization(pool_id, signer)
+            .call()
+            .await
+            .map_err(|e| anyhow::anyhow!("getAuthorization({pool_id}, {signer}): {e}"))?;
+        Ok(registration(a.cap, a.expiry))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Authorization, registration};
+
+    #[test]
+    fn zero_cap_and_expiry_is_unregistered() {
+        assert_eq!(registration(0, 0), None);
+        assert_eq!(
+            registration(5, 10),
+            Some(Authorization {
+                spending_cap: 5,
+                expiry: 10
+            })
+        );
+        assert_eq!(
+            registration(0, 10),
+            Some(Authorization {
+                spending_cap: 0,
+                expiry: 10
+            })
+        );
     }
 }

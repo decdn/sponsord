@@ -20,8 +20,8 @@ use alloy::primitives::U256;
 use alloy::signers::local::PrivateKeySigner;
 use decdn_client::buyer_pool::{ensure_allowance, open_pool};
 use decdn_e2e::chain::ChainFixture;
+use decdn_incentive::Deployment;
 use decdn_incentive::payment_pool::PaymentPool;
-use decdn_incentive::voucher_domain;
 use sponsord_core::money::MicroUsdc;
 use sponsord_core::treasury::{TreasuryConfig, connect};
 
@@ -62,12 +62,15 @@ async fn remaining_grows_after_topup() {
 
     // 2. Open a pool as that wallet via the deployed PaymentPool.openPool,
     //    capturing pool_id.
-    let voucher_dom = voucher_domain(chain.chain_id(), chain.addrs().payment_pool);
+    let deployment = Deployment {
+        chain_id: chain.chain_id(),
+        payment_pool: chain.addrs().payment_pool,
+    };
     let contract = PaymentPool::new(chain.addrs().payment_pool, open_provider);
     let opened = open_pool(
         &contract,
         Arc::new(signer.clone()),
-        &voucher_dom,
+        deployment,
         chain.usdc(),
         owner,
         U256::from(OPEN_DEPOSIT_MICRO_USDC),
@@ -97,4 +100,13 @@ async fn remaining_grows_after_topup() {
         .unwrap();
     let after = treasury.remaining(pool_id).await.unwrap();
     assert_eq!(after.0, before.0 + credited.0);
+
+    // A signer that never redeemed is unregistered.
+    assert_eq!(
+        treasury
+            .authorization(pool_id, alloy::primitives::Address::repeat_byte(0x77))
+            .await
+            .unwrap(),
+        None
+    );
 }
