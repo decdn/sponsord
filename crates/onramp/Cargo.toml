@@ -23,6 +23,7 @@ tracing-subscriber.workspace = true
 async-trait = "0.1"
 axum = "0.8"
 hex = "0.4"
+thiserror = "2"
 
 [dev-dependencies]
 wiremock = "0.6"
