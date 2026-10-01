@@ -6,7 +6,10 @@
 pub mod issuer;
 pub mod money;
 pub mod pool_watch;
+pub mod sponsor;
 pub mod treasury;
+
+pub use sponsor::{Info, Issued, Sponsor, SponsorConfig, SponsorError};
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

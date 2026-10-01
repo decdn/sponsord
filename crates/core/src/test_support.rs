@@ -10,14 +10,22 @@
 )]
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use alloy::primitives::{Address, B256};
+use alloy::signers::local::PrivateKeySigner;
 use async_trait::async_trait;
+use decdn_incentive::voucher_domain;
 
+use crate::issuer::Issuer;
 use crate::money::MicroUsdc;
+use crate::sponsor::Sponsor;
 use crate::treasury::{Authorization, Treasury};
+
+pub const TEST_CHAIN_ID: u64 = 421_614;
+pub const TEST_PAYMENT_POOL: Address = Address::repeat_byte(0x22);
+pub const TEST_POOL_ID: B256 = B256::repeat_byte(0x11);
 
 /// In-memory pool treasury: fixed owner, a mutable remaining balance, and a
 /// settable per-signer registration map.
@@ -84,4 +92,31 @@ impl Treasury for FakeTreasury {
         );
         Ok(self.registrations.lock().unwrap().get(&signer).copied())
     }
+}
+
+/// A `Sponsor` with a random owner key over a `FakeTreasury` that owns the
+/// test pool. The returned treasury is the same instance the sponsor reads,
+/// so tests can register signers or fail reads on it.
+pub async fn fake_sponsor(
+    max_spending_cap: u64,
+    max_ttl_secs: u64,
+) -> (Sponsor, Arc<FakeTreasury>) {
+    let signer = PrivateKeySigner::random();
+    let treasury = Arc::new(FakeTreasury::new(signer.address(), 100_000_000));
+    let issuer = Issuer::new(
+        signer,
+        voucher_domain(TEST_CHAIN_ID, TEST_PAYMENT_POOL),
+        TEST_POOL_ID,
+        max_spending_cap,
+        max_ttl_secs,
+    );
+    let sponsor = Sponsor::from_parts(
+        issuer,
+        treasury.clone() as Arc<dyn Treasury>,
+        TEST_CHAIN_ID,
+        TEST_PAYMENT_POOL,
+    )
+    .await
+    .unwrap();
+    (sponsor, treasury)
 }
