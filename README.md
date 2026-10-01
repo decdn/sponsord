@@ -14,6 +14,14 @@ deCDN's sponsored on-ramp, in three parts:
   download a throwaway key, gets a capability for it through the onramp,
   and hands the pull to `decdn`.
 
+Capabilities are node-agnostic: issuance involves no content hash or node
+discovery, only an allowance against the shared pool. A signer's cap and
+expiry are fixed on-chain at its first redemption, which is why
+`decdn-sponsored` uses one key per download, and why `/fund` answers
+`409 signer_expired` for a key whose registration has expired instead of
+renewing it. Spending is bounded by the gate in front of the daemon (the
+captcha on `/fund`), the per-capability cap, and the pool's own balance.
+
 `sponsord-core` (`crates/core`) is the daemon's logic as a library, for Rust
 programs that embed it instead of calling the daemon.
 
