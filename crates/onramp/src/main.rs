@@ -1,27 +1,32 @@
+use std::sync::Arc;
 use std::time::Duration;
 
-use sponsord_onramp::config::ServerConfig;
-use sponsord_onramp::{http, pool_watch, state};
+use sponsord_onramp::captcha::{CaptchaVerifier, Turnstile};
+use sponsord_onramp::config::OnrampConfig;
+use sponsord_onramp::daemon::{CapabilitySource, DaemonClient};
+use sponsord_onramp::{http, state};
+
+/// Bound on every outbound call (daemon and Turnstile), so a hung peer
+/// fails a request instead of holding it open.
+const OUTBOUND_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let cfg = ServerConfig::from_env()?;
-    let bind = cfg.bind;
-    let pool_id = cfg.pool_id;
-    let low_water = cfg.pool_low_water;
-    let refill = cfg.pool_refill;
-    let watch_interval = Duration::from_secs(cfg.pool_watch_interval_secs);
-    let app_state = state::build(cfg).await?;
-    tokio::spawn(pool_watch::run(
-        app_state.treasury.clone(),
-        watch_interval,
-        low_water,
-        refill,
-        pool_id,
+    let cfg = OnrampConfig::from_env()?;
+    let http_client = reqwest::Client::builder()
+        .timeout(OUTBOUND_TIMEOUT)
+        .build()?;
+    let source: Arc<dyn CapabilitySource> = Arc::new(DaemonClient::new(
+        &cfg.daemon_url,
+        cfg.daemon_token.clone(),
+        http_client.clone(),
     ));
-    let app = http::router(app_state);
+    let turnstile: Arc<dyn CaptchaVerifier> =
+        Arc::new(Turnstile::new(cfg.turnstile_secret.clone(), http_client));
+    let bind = cfg.bind;
+    let app = http::router(state::build(cfg, source, turnstile).await?);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(%bind, "sponsord-onramp listening");
     axum::serve(listener, app).await?;

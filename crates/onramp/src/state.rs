@@ -1,51 +1,45 @@
 use std::sync::Arc;
 
-use crate::captcha::{CaptchaVerifier, Turnstile};
-use crate::config::ServerConfig;
-use crate::issuer::Issuer;
+use crate::captcha::CaptchaVerifier;
+use crate::config::OnrampConfig;
+use crate::daemon::{CapabilitySource, DaemonInfo};
 use crate::store::Store;
-use crate::treasury::Treasury;
 
-/// Shared server state handed to every HTTP handler.
+/// Shared state handed to every HTTP handler.
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<Store>,
-    pub treasury: Arc<dyn Treasury>,
-    pub issuer: Arc<Issuer>,
+    pub source: Arc<dyn CapabilitySource>,
     pub turnstile: Arc<dyn CaptchaVerifier>,
-    pub cfg: Arc<ServerConfig>,
+    pub cfg: Arc<OnrampConfig>,
+    /// The daemon's `/v1/info`, read once at startup; the installers render
+    /// its chain id and `PaymentPool` address.
+    pub chain: Arc<DaemonInfo>,
 }
 
-/// Assemble `AppState`: open the store, load the hot wallet once, build the
-/// pool treasury + capability issuer from it, and confirm this wallet owns
-/// the configured pool before serving.
-pub async fn build(cfg: ServerConfig) -> anyhow::Result<AppState> {
+/// Assemble `AppState`: read the daemon's `/v1/info`, refuse configured
+/// terms it would reject, and open the grant store.
+///
+/// # Errors
+///
+/// The daemon is unreachable or rejects the token, the configured terms are
+/// out of its bounds, or the store fails to open.
+pub async fn build(
+    cfg: OnrampConfig,
+    source: Arc<dyn CapabilitySource>,
+    turnstile: Arc<dyn CaptchaVerifier>,
+) -> anyhow::Result<AppState> {
+    let info = source
+        .info()
+        .await
+        .map_err(|e| anyhow::anyhow!("read daemon info from {}: {e}", cfg.daemon_url))?;
+    cfg.check_against(&info)?;
     let store = Arc::new(Store::open(&cfg.data_dir)?);
-    let turnstile: Arc<dyn CaptchaVerifier> = Arc::new(Turnstile::new(
-        cfg.turnstile_secret.clone(),
-        reqwest::Client::new(),
-    ));
-    let signer = cfg.load_treasury_signer().await?;
-    let issuer = Arc::new(cfg.build_issuer(signer.clone()));
-    let treasury: Arc<dyn Treasury> = Arc::from(cfg.build_treasury(signer).await?);
-
-    // Boot check: the capability-signing key (issuer) must own the
-    // configured pool, else every capability we sign is worthless (the node
-    // recovers a non-owner).
-    let owner = treasury.pool_owner(cfg.pool_id).await?;
-    anyhow::ensure!(
-        owner == issuer.owner_address(),
-        "configured SPONSOR_POOL_ID {} is owned on-chain by {owner}, not the capability-signing \
-         wallet {} — wrong pool id, keystore, or contract",
-        cfg.pool_id,
-        issuer.owner_address()
-    );
-
     Ok(AppState {
         store,
-        treasury,
-        issuer,
+        source,
         turnstile,
         cfg: Arc::new(cfg),
+        chain: Arc::new(info),
     })
 }

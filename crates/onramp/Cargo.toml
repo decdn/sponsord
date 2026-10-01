@@ -11,9 +11,6 @@ workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 alloy.workspace = true
-decdn-client.workspace = true
-decdn-incentive.workspace = true
-sponsord-core = { path = "../core" }
 redb = "4"
 reqwest = { version = "0.12", features = ["json"] }
 serde.workspace = true
@@ -22,14 +19,12 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 async-trait = "0.1"
 axum = "0.8"
-hex = "0.4"
 thiserror = "2"
 
 [dev-dependencies]
 wiremock = "0.6"
 serial_test = "3"
 tower = { version = "0.5", features = ["util"] }
-sponsord-core = { path = "../core", features = ["test-support"] }
-# Used by `test_support.rs` (pulled into the integration-test binary via
-# `#[path]` from `tests/http_contract.rs`, not part of the shipped lib/bin).
+# Used by `test_support.rs` (pulled into the integration-test binaries via
+# `#[path]`, not part of the shipped lib/bin) and by the store tests.
 tempfile = "3"
