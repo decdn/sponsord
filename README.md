@@ -43,6 +43,9 @@ cp daemon.env.example daemon.env   # then edit
 set -a; . ./daemon.env; set +a; cargo run -p sponsord
 ```
 
+Start `sponsord` before `sponsord-onramp`: the onramp reads the daemon's
+settings at startup.
+
 ### `SPONSORD_*` environment variables
 
 | Variable | Required | Default | Purpose |
@@ -121,6 +124,10 @@ macOS/Linux and Windows), `/fund` (captcha page and capability issuance), and
 cp onramp.env.example onramp.env   # then edit
 set -a; . ./onramp.env; set +a; cargo run -p sponsord-onramp
 ```
+
+Start `sponsord` first. The onramp exits at startup when the daemon is
+unreachable, so run it under a supervisor that restarts it on failure (for
+example systemd `Restart=on-failure`).
 
 ### `ONRAMP_*` environment variables
 
@@ -203,12 +210,10 @@ The workspace path-depends on its sibling `decdn` checkout
 CI checks out `decdn/decdn` beside this repo: `main` by default, or any ref a
 manual run names (`decdn_ref`), so breakage from `decdn` changes shows up
 early. Releases build against the commit pinned in `decdn.ref` instead, so a
-tag always builds the same code.
+tag always builds the same code. `cargo test -p sponsord-core --features
+anvil-e2e` runs the treasury against a local anvil chain.
 
 ## Releasing
-
-`cargo test -p sponsord-core --features anvil-e2e` runs the treasury against a
-local anvil chain.
 
 1. Point `decdn.ref` at the `decdn` commit (full SHA) or tag to build
    against, and make sure `Cargo.lock` is consistent with it

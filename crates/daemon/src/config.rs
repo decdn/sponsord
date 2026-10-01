@@ -19,7 +19,7 @@ fn env(k: &str) -> anyhow::Result<String> {
 
 fn env_u64(k: &str, default: u64) -> anyhow::Result<u64> {
     match std::env::var(k) {
-        Ok(v) => Ok(v.parse()?),
+        Ok(v) => v.parse().map_err(|e| anyhow::anyhow!("{k}: {e}")),
         Err(_) => Ok(default),
     }
 }
@@ -47,13 +47,16 @@ impl DaemonConfig {
         Ok(Self {
             bind: SocketAddr::from_str(
                 &std::env::var("SPONSORD_BIND").unwrap_or_else(|_| "127.0.0.1:8090".into()),
-            )?,
+            )
+            .map_err(|e| anyhow::anyhow!("SPONSORD_BIND: {e}"))?,
             api_token,
             sponsor: SponsorConfig {
                 rpc_url: env("SPONSORD_RPC_URL")?,
                 chain_id: env_u64("SPONSORD_CHAIN_ID", 421_614)?,
-                payment_pool: Address::from_str(&env("SPONSORD_PAYMENT_POOL_ADDR")?)?,
-                pool_id: B256::from_str(&env("SPONSORD_POOL_ID")?)?,
+                payment_pool: Address::from_str(&env("SPONSORD_PAYMENT_POOL_ADDR")?)
+                    .map_err(|e| anyhow::anyhow!("SPONSORD_PAYMENT_POOL_ADDR: {e}"))?,
+                pool_id: B256::from_str(&env("SPONSORD_POOL_ID")?)
+                    .map_err(|e| anyhow::anyhow!("SPONSORD_POOL_ID: {e}"))?,
                 treasury_keystore: PathBuf::from(env("SPONSORD_TREASURY_KEYSTORE")?),
                 treasury_password: env("SPONSORD_TREASURY_PASSWORD")?,
                 max_spending_cap: env_u64("SPONSORD_MAX_SPENDING_CAP_MICRO_USDC", 5_000_000)?,
@@ -112,6 +115,16 @@ mod tests {
         assert_eq!(cfg.sponsor.max_spending_cap, 5_000_000);
         assert_eq!(cfg.sponsor.max_ttl_secs, 172_800);
         assert_eq!(cfg.pool_watch_interval, Duration::from_secs(3600));
+    }
+
+    #[test]
+    #[serial]
+    fn parse_errors_name_the_variable() {
+        set_required(&"a".repeat(32));
+        unsafe { std::env::set_var("SPONSORD_MAX_TTL_SECS", "abc") };
+        let err = DaemonConfig::from_env().err().unwrap().to_string();
+        unsafe { std::env::remove_var("SPONSORD_MAX_TTL_SECS") };
+        assert!(err.contains("SPONSORD_MAX_TTL_SECS"), "{err}");
     }
 
     #[test]

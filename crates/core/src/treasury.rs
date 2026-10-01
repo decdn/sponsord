@@ -1,7 +1,8 @@
-//! `Treasury`: the on-chain `PaymentPool` operations the sponsor needs — read
-//! the pool's remaining balance, top it up from the hot wallet, read its
-//! owner (a boot-time sanity check), and read a signer's registration. Mocked by `FakeTreasury` in the HTTP
-//! contract tests; backed by `DecdnTreasury` in production.
+//! `Treasury`: the on-chain `PaymentPool` operations the sponsor needs. It
+//! reads the pool's remaining balance, tops the pool up from the hot wallet,
+//! reads the pool's owner (a boot-time sanity check), and reads a signer's
+//! registration. `DecdnTreasury` backs it in production; tests use
+//! `test_support::FakeTreasury`.
 
 use alloy::primitives::{Address, B256, U256};
 use alloy::providers::Provider;

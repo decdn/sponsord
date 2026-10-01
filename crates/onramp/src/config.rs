@@ -10,7 +10,7 @@ fn env(k: &str) -> anyhow::Result<String> {
 
 fn env_opt_u64(k: &str) -> anyhow::Result<Option<u64>> {
     match std::env::var(k) {
-        Ok(v) => Ok(Some(v.parse()?)),
+        Ok(v) => v.parse().map(Some).map_err(|e| anyhow::anyhow!("{k}: {e}")),
         Err(_) => Ok(None),
     }
 }
@@ -110,14 +110,16 @@ impl OnrampConfig {
         Ok(Self {
             bind: SocketAddr::from_str(
                 &std::env::var("ONRAMP_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into()),
-            )?,
+            )
+            .map_err(|e| anyhow::anyhow!("ONRAMP_BIND: {e}"))?,
             public_url: std::env::var("ONRAMP_PUBLIC_URL")
                 .unwrap_or_else(|_| "https://up.decdn.org".into()),
             daemon_url: std::env::var("ONRAMP_DAEMON_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:8090".into()),
             daemon_token: env("ONRAMP_DAEMON_TOKEN")?,
             rpc_url: env("ONRAMP_RPC_URL")?,
-            capacity_bond: Address::from_str(&env("ONRAMP_CAPACITY_BOND_ADDR")?)?,
+            capacity_bond: Address::from_str(&env("ONRAMP_CAPACITY_BOND_ADDR")?)
+                .map_err(|e| anyhow::anyhow!("ONRAMP_CAPACITY_BOND_ADDR: {e}"))?,
             spending_cap: env_opt_u64("ONRAMP_SPENDING_CAP_MICRO_USDC")?,
             ttl_secs: env_opt_u64("ONRAMP_TTL_SECS")?,
             turnstile_secret: env("ONRAMP_TURNSTILE_SECRET")?,

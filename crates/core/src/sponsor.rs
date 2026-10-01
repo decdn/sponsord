@@ -22,7 +22,7 @@ use crate::pool_watch;
 use crate::treasury::{self, Treasury, TreasuryConfig};
 
 /// Everything `Sponsor::connect` needs.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SponsorConfig {
     pub rpc_url: String,
     pub chain_id: u64,
@@ -32,6 +32,21 @@ pub struct SponsorConfig {
     pub treasury_password: String,
     pub max_spending_cap: u64,
     pub max_ttl_secs: u64,
+}
+
+impl std::fmt::Debug for SponsorConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SponsorConfig")
+            .field("rpc_url", &self.rpc_url)
+            .field("chain_id", &self.chain_id)
+            .field("payment_pool", &self.payment_pool)
+            .field("pool_id", &self.pool_id)
+            .field("treasury_keystore", &self.treasury_keystore)
+            .field("treasury_password", &"<redacted>")
+            .field("max_spending_cap", &self.max_spending_cap)
+            .field("max_ttl_secs", &self.max_ttl_secs)
+            .finish()
+    }
 }
 
 /// What a caller needs to know about this sponsor.
@@ -59,9 +74,9 @@ pub enum SponsorError {
     Terms(#[from] TermsError),
     #[error("signer registration expired at {expiry}")]
     SignerExpired { expiry: u64 },
-    #[error("read signer authorization: {0}")]
+    #[error("read signer authorization: {0:#}")]
     Chain(anyhow::Error),
-    #[error("{0}")]
+    #[error("{0:#}")]
     Sign(anyhow::Error),
 }
 
@@ -221,6 +236,23 @@ mod tests {
 
     const NOW: u64 = 1_769_904_000;
     const SIGNER: Address = Address::repeat_byte(0xaa);
+
+    #[test]
+    fn debug_redacts_the_treasury_password() {
+        let cfg = SponsorConfig {
+            rpc_url: "http://localhost:8545".into(),
+            chain_id: TEST_CHAIN_ID,
+            payment_pool: TEST_PAYMENT_POOL,
+            pool_id: TEST_POOL_ID,
+            treasury_keystore: PathBuf::from("/tmp/ks.json"),
+            treasury_password: "hunter2-secret".into(),
+            max_spending_cap: 5_000_000,
+            max_ttl_secs: 172_800,
+        };
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("hunter2-secret"));
+        assert!(shown.contains("<redacted>"));
+    }
 
     #[tokio::test]
     async fn from_parts_rejects_a_pool_owned_by_another_key() {

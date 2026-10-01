@@ -25,7 +25,7 @@ use decdn_incentive::payment_pool::PaymentPool;
 use sponsord_core::money::MicroUsdc;
 use sponsord_core::treasury::{TreasuryConfig, connect};
 
-/// Opening deposit, in USDC base units (6 decimals) — well above the top-up
+/// Opening deposit, in USDC base units (6 decimals), well above the top-up
 /// amount so `remaining` never risks going negative.
 const OPEN_DEPOSIT_MICRO_USDC: u64 = 50_000_000;
 /// Amount credited by the test's `top_up` call.
