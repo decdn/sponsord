@@ -186,10 +186,7 @@ async fn capability_inside_node_margin_rotates_to_a_fresh_key() {
     let data = tmp.path().join("sponsored");
 
     // Still unexpired, but a default node already refuses vouchers under it.
-    let node_margin = decdn_common::config::capability_expiry_margin_secs(
-        decdn_common::config::DEFAULT_REDEEM_INTERVAL_SECS,
-    );
-    let near = gateway_with_capability(now() + node_margin - 60, 1).await;
+    let near = gateway_with_capability(now() + flow::NODE_EXPIRY_MARGIN_SECS - 60, 1).await;
     let failing = config(&near.uri(), &stub_decdn(tmp.path(), 1), &data);
     flow::pull(HASH, &tmp.path().join("out"), None, &failing)
         .await

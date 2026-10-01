@@ -2982,7 +2982,6 @@ dependencies = [
  "alloy",
  "anyhow",
  "clap",
- "decdn-common",
  "decdn-incentive",
  "getrandom 0.3.4",
  "hex",

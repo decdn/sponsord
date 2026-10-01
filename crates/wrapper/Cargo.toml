@@ -26,7 +26,6 @@ workspace = true
 alloy = { workspace = true, features = ["signer-keystore-geth-compat"] }
 anyhow.workspace = true
 tokio.workspace = true
-decdn-common.workspace = true
 decdn-incentive.workspace = true
 serde.workspace = true
 serde_json.workspace = true
