@@ -8,6 +8,8 @@ use std::num::NonZeroU64;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use decdn_common::config::{DEFAULT_REDEEM_INTERVAL_SECS, capability_expiry_margin_secs};
+
 use crate::api::Api;
 use crate::config::WrapperConfig;
 use crate::runner::{self, PullArgs};
@@ -16,8 +18,14 @@ use crate::session::{self, Session};
 /// How long to wait for the browser captcha flow to produce a capability.
 const CAPABILITY_POLL_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// A saved capability this close to expiry is replaced before pulling.
-const EXPIRY_MARGIN_SECS: u64 = 300;
+/// Runway the download itself needs on top of the node's refusal window.
+const DOWNLOAD_SLACK_SECS: u64 = 3600;
+
+/// A saved capability this close to expiry is replaced before pulling: the
+/// default node's capability-expiry margin (it refuses vouchers that close to
+/// expiry) plus [`DOWNLOAD_SLACK_SECS`].
+const EXPIRY_MARGIN_SECS: u64 =
+    capability_expiry_margin_secs(DEFAULT_REDEEM_INTERVAL_SECS).saturating_add(DOWNLOAD_SLACK_SECS);
 
 /// # Errors
 /// Invalid hash, state dir or key failure, sponsor unreachable / no
@@ -38,7 +46,7 @@ pub async fn pull(
         .is_some_and(|grant| grant.expiry <= now.saturating_add(EXPIRY_MARGIN_SECS))
     {
         // A key's cap and expiry are frozen on-chain at its first
-        // redemption, so an expired capability means a fresh key.
+        // redemption, so a capability near expiry means a fresh key.
         session.discard()?;
         session = Session::open(&cfg.data_dir, &hash)?;
     }
