@@ -47,8 +47,9 @@ pub enum TermsError {
 /// Signs capped, expiring capabilities against one pool, as the pool owner,
 /// within [`Limits`].
 ///
-/// Any alloy [`Signer`] works: a local key, or a remote one such as a KMS or
-/// a hardware wallet. With a local key, signing is deterministic (RFC 6979),
+/// Any alloy [`Signer`] that signs raw hashes works: a local key, or a remote
+/// one such as AWS or GCP KMS (not alloy's `LedgerSigner`, which refuses
+/// `sign_hash`). With a local key, signing is deterministic (RFC 6979),
 /// so equal terms give a byte-identical token; a remote signer may give a
 /// different, equally valid signature each time.
 pub struct Issuer {

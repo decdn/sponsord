@@ -56,9 +56,10 @@ impl Sponsor {
     /// Connect to the pool with `signer` (the pool owner, which also funds
     /// top-ups) and run the boot owner check.
     ///
-    /// `signer` is any alloy signer that can sign both typed data and
+    /// `signer` is any cloneable alloy signer that signs raw hashes and
     /// transactions: a local key (`PrivateKeySigner`), or a remote one such
-    /// as a KMS or hardware wallet.
+    /// as AWS or GCP KMS. Hardware wallets don't qualify yet: alloy's
+    /// `LedgerSigner` signs only typed data and isn't `Clone`.
     ///
     /// # Errors
     ///

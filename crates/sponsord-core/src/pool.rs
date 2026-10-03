@@ -77,9 +77,14 @@ impl ChainPool {
         S: TxSigner<Signature> + Send + Sync + 'static,
     {
         let owner = signer.address();
-        let url = rpc_url
-            .parse()
-            .map_err(|e| anyhow::anyhow!("RPC URL {rpc_url:?}: {e}"))?;
+        // The URL itself stays out of the error: RPC URLs often carry an API
+        // key in their path or query.
+        let url = rpc_url.parse().map_err(|e| {
+            anyhow::anyhow!(
+                "RPC URL ({} characters) is not a valid URL: {e}",
+                rpc_url.len()
+            )
+        })?;
         let provider = ProviderBuilder::new()
             .wallet(EthereumWallet::new(signer))
             .connect_http(url)
@@ -158,8 +163,26 @@ impl PoolChain for ChainPool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
+    use alloy::signers::local::PrivateKeySigner;
+
     use super::*;
+
+    #[tokio::test]
+    async fn a_malformed_rpc_url_stays_out_of_the_error() {
+        let err = ChainPool::connect(
+            "htt p://rpc.example/v2/SECRET-API-KEY",
+            Address::ZERO,
+            PrivateKeySigner::random(),
+        )
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(!err.contains("SECRET-API-KEY"), "{err}");
+        assert!(err.contains("not a valid URL"), "{err}");
+    }
 
     #[test]
     fn zero_cap_and_expiry_is_unregistered() {

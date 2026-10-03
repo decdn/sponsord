@@ -81,7 +81,10 @@ pub async fn run(
 ) {
     let mut tick = tokio::time::interval(cfg.interval);
     loop {
+        // Biased: when a tick and the cancellation are both ready, stop rather
+        // than start another sweep.
         tokio::select! {
+            biased;
             () = shutdown.cancelled() => return,
             _ = tick.tick() => {}
         }
@@ -188,6 +191,18 @@ mod tests {
         sweep(&pool, TEST_POOL_ID, &CFG, &status, &FixedClock::new(1)).await;
         let s = status.snapshot();
         assert_eq!((s.topups, s.failures), (0, 1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cancelled_keeper_starts_no_sweep_even_with_a_tick_ready() {
+        let pool = Arc::new(FakePool::new(Address::repeat_byte(1), 0));
+        let status = Arc::new(KeeperStatus::default());
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        // The interval's first tick is ready at once, as is the cancellation.
+        run(pool.clone(), TEST_POOL_ID, CFG, status.clone(), shutdown).await;
+        assert_eq!(status.snapshot(), KeeperSnapshot::default());
+        assert_eq!(pool.remaining_now(), MicroUsdc(0), "no top-up was sent");
     }
 
     #[tokio::test(start_paused = true)]

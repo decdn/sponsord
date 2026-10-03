@@ -23,7 +23,7 @@ All notable changes to this project are documented here. The format follows
 - Onramp JSON routes move under `/v1`: `POST /v1/fund` and
   `GET /v1/capability`. The fund body's `turnstile_token` is `proof`, and
   `captcha_failed` is `gate_failed`.
-- `sponsord-core` takes any alloy signer (local key, KMS, hardware wallet)
+- `sponsord-core` takes any alloy signer that signs hashes (local key, KMS)
   in `Sponsor::connect(signer, ChainConfig, Limits)` instead of a keystore
   path and password; terms are `TermsRequest`/`Terms`, money is `MicroUsdc`
   throughout, and the keeper takes a `KeeperConfig` and a
