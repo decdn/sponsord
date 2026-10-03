@@ -14,7 +14,8 @@ Report vulnerabilities as described in [SECURITY.md](../SECURITY.md).
 The treasury key both owns the pool and pays for top-ups
 (`PaymentPool.topUp` is owner-only), so a compromised daemon host loses the
 wallet's funds as well as the pool. Keep only what the next few top-ups need
-in that wallet.
+in that wallet. Splitting the two is tracked in
+[#25](https://github.com/decdn/sponsord/issues/25).
 
 ## What bounds a loss
 

@@ -98,8 +98,10 @@ serve `http::router(state)`. Everything else (installers, `/v1/profile`, the
 hand-off, rate limits) stays as it is. `TurnstileGate`
 (`crates/sponsord-onramp/src/gate/turnstile.rs`) is a complete example.
 
-Webhook, signed-token and allow-all gates are planned as built-ins; see the
-issue tracker.
+Webhook ([#22](https://github.com/decdn/sponsord/issues/22)), signed-JWT
+([#23](https://github.com/decdn/sponsord/issues/23)) and allow-all
+([#24](https://github.com/decdn/sponsord/issues/24)) gates are planned as
+built-ins.
 
 The onramp's own API (what the CLI and the gate page call) is in
 [`docs/openapi/sponsord-onramp.json`](openapi/sponsord-onramp.json).
