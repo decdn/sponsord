@@ -61,7 +61,16 @@ impl FromRequestParts<AppState> for ClientIp {
 /// 0 disables it; a request with no known address is never limited.
 pub struct RateLimiter {
     per_minute: u32,
-    windows: Mutex<HashMap<IpAddr, (u64, u32)>>,
+    windows: Mutex<Windows>,
+}
+
+#[derive(Default)]
+struct Windows {
+    /// Per address: the minute counted, and the requests in it.
+    counts: HashMap<IpAddr, (u64, u32)>,
+    /// The minute of the last sweep, so a busy minute sweeps once, not on
+    /// every request.
+    swept: u64,
 }
 
 /// Distinct addresses tracked before stale windows are swept.
@@ -72,7 +81,7 @@ impl RateLimiter {
     pub fn new(per_minute: u32) -> Self {
         Self {
             per_minute,
-            windows: Mutex::new(HashMap::new()),
+            windows: Mutex::default(),
         }
     }
 
@@ -87,10 +96,11 @@ impl RateLimiter {
             .windows
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if windows.len() >= SWEEP_AT {
-            windows.retain(|_, (m, _)| *m == minute);
+        if windows.counts.len() >= SWEEP_AT && windows.swept != minute {
+            windows.counts.retain(|_, (m, _)| *m == minute);
+            windows.swept = minute;
         }
-        let (m, count) = windows.entry(ip).or_insert((minute, 0));
+        let (m, count) = windows.counts.entry(ip).or_insert((minute, 0));
         if *m != minute {
             *m = minute;
             *count = 0;
@@ -115,6 +125,24 @@ mod tests {
         assert!(!limiter.allow(a, 62));
         assert!(limiter.allow(b, 62), "another address has its own budget");
         assert!(limiter.allow(a, 120), "a new minute resets the count");
+    }
+
+    #[test]
+    fn a_full_map_is_swept_once_per_minute() {
+        let limiter = RateLimiter::new(5);
+        let ip = |n: u32| Some(IpAddr::from(n.to_be_bytes()));
+        for n in 0..SWEEP_AT as u32 {
+            assert!(limiter.allow(ip(n), 60));
+        }
+        // A new minute: the first request sweeps the stale windows...
+        assert!(limiter.allow(ip(u32::MAX), 120));
+        assert_eq!(limiter.windows.lock().unwrap().counts.len(), 1);
+        // ...and refilling the map within that minute sweeps nothing more.
+        for n in 0..SWEEP_AT as u32 {
+            assert!(limiter.allow(ip(n), 121));
+        }
+        assert_eq!(limiter.windows.lock().unwrap().swept, 2);
+        assert_eq!(limiter.windows.lock().unwrap().counts.len(), SWEEP_AT + 1);
     }
 
     #[test]

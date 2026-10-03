@@ -31,13 +31,23 @@ async fn main() -> anyhow::Result<()> {
         http_client.clone(),
     ));
     let gate: Arc<dyn Gate> = match cfg.gate {
-        GateKind::Turnstile => Arc::new(TurnstileGate::new(
-            cfg.turnstile_secret.clone(),
-            cfg.turnstile_sitekey.clone(),
-            cfg.brand_name.clone(),
-            cfg.gate_template.clone(),
-            http_client,
-        )),
+        GateKind::Turnstile => {
+            let turnstile = cfg
+                .turnstile
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("the turnstile gate has no settings"))?;
+            Arc::new(TurnstileGate::new(
+                turnstile.secret,
+                turnstile.sitekey,
+                cfg.brand_name.clone(),
+                cfg.gate_template.clone(),
+                http_client,
+            ))
+        }
+        GateKind::Custom => anyhow::bail!(
+            "ONRAMP_GATE=custom is for programs that embed sponsord-onramp with their own \
+             Gate (docs/integrator.md); this binary has only the turnstile gate"
+        ),
     };
     let state = state::build(&cfg, daemon, gate).await?;
 
@@ -65,8 +75,12 @@ async fn main() -> anyhow::Result<()> {
 
 /// Resolve on Ctrl-C or SIGTERM, cancelling `shutdown`.
 async fn shutdown_signal(shutdown: CancellationToken) {
+    // A handler that fails to register waits forever instead of resolving,
+    // so only an actual signal shuts the server down.
     let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
     };
     #[cfg(unix)]
     let term = async {

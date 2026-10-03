@@ -21,7 +21,7 @@ use sponsord_api::daemon::{Info, IssueRequest, IssueResponse};
 use sponsord_api::time::{Clock, SystemClock};
 use sponsord_api::{ErrorCode, IssuedCapability, MicroUsdc};
 
-use crate::config::{GateKind, OnrampConfig, ReleasePin};
+use crate::config::{GateKind, OnrampConfig, ReleasePin, TurnstileConfig};
 use crate::daemon::CapabilitySource;
 use crate::gate::Gate;
 use crate::net::ClientIpSource;
@@ -51,8 +51,10 @@ pub fn test_config() -> OnrampConfig {
         gate: GateKind::Turnstile,
         brand_name: "deCDN".into(),
         gate_template: None,
-        turnstile_secret: "secret".into(),
-        turnstile_sitekey: "TEST_SITEKEY".into(),
+        turnstile: Some(TurnstileConfig {
+            secret: "secret".into(),
+            sitekey: "TEST_SITEKEY".into(),
+        }),
         client_ip: ClientIpSource::Peer,
         fund_rate_per_min: 0,
         poll_rate_per_min: 0,

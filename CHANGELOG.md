@@ -17,7 +17,9 @@ All notable changes to this project are documented here. The format follows
   `ONRAMP_DAEMON_TOKEN_FILE`, `ONRAMP_TURNSTILE_SECRET_FILE`.
 - `ONRAMP_RELEASES_BASE` (default `https://github.com/decdn`): where the
   installers download binaries from.
-- Onramp: a pluggable `Gate` (Turnstile built in; `ONRAMP_GATE`), gate-page
+- Onramp: a pluggable `Gate` (Turnstile built in; `ONRAMP_GATE`, whose
+  `custom` value lets a program embedding the onramp supply its own gate,
+  with the Turnstile settings then not required), gate-page
   branding (`ONRAMP_BRAND_NAME`, `ONRAMP_GATE_TEMPLATE`), per-IP rate limits
   on `/v1/fund` and `/v1/capability` (`ONRAMP_FUND_RATE_PER_MIN`,
   `ONRAMP_POLL_RATE_PER_MIN`), the client's address passed to the gate

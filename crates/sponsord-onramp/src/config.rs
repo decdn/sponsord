@@ -75,7 +75,7 @@ fn is_release_tag(tag: &str) -> bool {
 #[derive(Debug, Parser)]
 #[command(name = "sponsord-onramp", version)]
 #[command(group(ArgGroup::new("daemon_token_src").required(true).args(["daemon_token", "daemon_token_file"])))]
-#[command(group(ArgGroup::new("turnstile_secret_src").required(true).args(["turnstile_secret", "turnstile_secret_file"])))]
+#[command(group(ArgGroup::new("turnstile_secret_src").args(["turnstile_secret", "turnstile_secret_file"])))]
 pub struct Args {
     /// Address the HTTP server listens on.
     #[arg(long, env = "ONRAMP_BIND", default_value = "127.0.0.1:8080")]
@@ -133,15 +133,17 @@ pub struct Args {
     #[arg(long, env = "ONRAMP_GATE_TEMPLATE")]
     pub gate_template: Option<PathBuf>,
 
-    /// Cloudflare Turnstile server-side secret.
+    /// Cloudflare Turnstile server-side secret (required with
+    /// `--gate turnstile`).
     #[arg(long, env = "ONRAMP_TURNSTILE_SECRET", hide_env_values = true)]
     pub turnstile_secret: Option<String>,
     /// File holding the Turnstile secret, instead of `--turnstile-secret`.
     #[arg(long, env = "ONRAMP_TURNSTILE_SECRET_FILE")]
     pub turnstile_secret_file: Option<PathBuf>,
-    /// Cloudflare Turnstile sitekey, shown in the gate page.
+    /// Cloudflare Turnstile sitekey, shown in the gate page (required with
+    /// `--gate turnstile`).
     #[arg(long, env = "ONRAMP_TURNSTILE_SITEKEY")]
-    pub turnstile_sitekey: String,
+    pub turnstile_sitekey: Option<String>,
 
     /// Header the trusted reverse proxy in front of the onramp puts the
     /// client's address in (e.g. `CF-Connecting-IP`, `X-Forwarded-For`; of a
@@ -188,6 +190,18 @@ pub struct Args {
 pub enum GateKind {
     /// A Cloudflare Turnstile captcha.
     Turnstile,
+    /// A gate the program supplies itself, for programs that embed
+    /// `sponsord-onramp` with their own `Gate` (docs/integrator.md). The
+    /// stock `sponsord-onramp` binary refuses it.
+    Custom,
+}
+
+/// The Turnstile gate's settings.
+#[derive(Debug, Clone)]
+pub struct TurnstileConfig {
+    pub secret: Secret,
+    /// Letters, digits, `_` and `-` only: it is interpolated into the page.
+    pub sitekey: String,
 }
 
 /// Resolved configuration.
@@ -211,8 +225,8 @@ pub struct OnrampConfig {
     pub brand_name: String,
     /// The gate page template, read at startup; `None` is the built-in one.
     pub gate_template: Option<String>,
-    pub turnstile_secret: Secret,
-    pub turnstile_sitekey: String,
+    /// Set exactly when `gate` is [`GateKind::Turnstile`].
+    pub turnstile: Option<TurnstileConfig>,
     pub client_ip: ClientIpSource,
     pub fund_rate_per_min: u32,
     pub poll_rate_per_min: u32,
@@ -246,14 +260,31 @@ impl OnrampConfig {
             releases_base.starts_with("https://"),
             "ONRAMP_RELEASES_BASE must be an https URL"
         );
-        anyhow::ensure!(
-            !args.turnstile_sitekey.is_empty()
-                && args
-                    .turnstile_sitekey
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
-            "ONRAMP_TURNSTILE_SITEKEY must be letters, digits, '_' and '-'"
-        );
+        let turnstile = match args.gate {
+            GateKind::Turnstile => {
+                let sitekey = args.turnstile_sitekey.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "ONRAMP_TURNSTILE_SITEKEY is required with ONRAMP_GATE=turnstile"
+                    )
+                })?;
+                anyhow::ensure!(
+                    !sitekey.is_empty()
+                        && sitekey
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+                    "ONRAMP_TURNSTILE_SITEKEY must be letters, digits, '_' and '-'"
+                );
+                Some(TurnstileConfig {
+                    secret: Secret::resolve(
+                        "ONRAMP_TURNSTILE_SECRET",
+                        args.turnstile_secret,
+                        args.turnstile_secret_file.as_deref(),
+                    )?,
+                    sitekey,
+                })
+            }
+            GateKind::Custom => None,
+        };
         Ok(Self {
             bind: args.bind,
             public_url: base_url("ONRAMP_PUBLIC_URL", &args.public_url)?,
@@ -269,12 +300,7 @@ impl OnrampConfig {
             min_cli_version: args.min_cli_version,
             spending_cap: args.spending_cap,
             ttl_secs: args.ttl_secs,
-            turnstile_secret: Secret::resolve(
-                "ONRAMP_TURNSTILE_SECRET",
-                args.turnstile_secret,
-                args.turnstile_secret_file.as_deref(),
-            )?,
-            turnstile_sitekey: args.turnstile_sitekey,
+            turnstile,
             gate: args.gate,
             brand_name: args.brand_name,
             gate_template: args
@@ -361,8 +387,11 @@ fn check_term(name: &str, value: Option<u64>, max: u64) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    /// An override value that drops the flag instead.
+    const UNSET: &str = "<unset>";
+
     /// The required flags, with `overrides` (`[flag, value]` pairs)
-    /// replacing or adding to them.
+    /// replacing, adding to or ([`UNSET`]) removing them.
     fn args(overrides: &[&str]) -> Result<Args, clap::Error> {
         let ab = "ab".repeat(32);
         let cd = "cd".repeat(32);
@@ -384,7 +413,9 @@ mod tests {
         for pair in overrides.chunks(2) {
             let (flag, value) = (pair[0], pair[1]);
             flags.retain(|(f, _)| *f != flag);
-            flags.push((flag, value));
+            if value != UNSET {
+                flags.push((flag, value));
+            }
         }
         let argv =
             std::iter::once("sponsord-onramp").chain(flags.iter().flat_map(|(f, v)| [*f, *v]));
@@ -436,6 +467,24 @@ mod tests {
         }
         let keyed_rpc = args(&["--rpc-url", "https://rpc.example/v2?key=abc"]).unwrap();
         assert!(OnrampConfig::from_args(keyed_rpc).is_ok());
+    }
+
+    #[test]
+    fn turnstile_settings_are_required_only_for_the_turnstile_gate() {
+        let bare = ["--turnstile-secret", UNSET, "--turnstile-sitekey", UNSET];
+        let err = OnrampConfig::from_args(args(&bare).unwrap()).unwrap_err();
+        assert!(
+            err.to_string().contains("ONRAMP_TURNSTILE_SITEKEY"),
+            "{err}"
+        );
+        let no_secret = ["--turnstile-secret", UNSET];
+        let err = OnrampConfig::from_args(args(&no_secret).unwrap()).unwrap_err();
+        assert!(err.to_string().contains("ONRAMP_TURNSTILE_SECRET"), "{err}");
+
+        let custom = [bare.as_slice(), &["--gate", "custom"]].concat();
+        let cfg = OnrampConfig::from_args(args(&custom).unwrap()).unwrap();
+        assert_eq!(cfg.gate, GateKind::Custom);
+        assert!(cfg.turnstile.is_none());
     }
 
     #[test]

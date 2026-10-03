@@ -99,7 +99,7 @@ async fn pull_gets_a_capability_through_the_gate_and_runs_decdn() {
     let (sponsor, pool) = fake_sponsor(5_000_000, 172_800).await;
     let daemon_url = serve(sponsord::http::router(ApiState::new(
         Arc::new(sponsor),
-        Arc::from(TOKEN),
+        TOKEN.into(),
     )))
     .await;
 
