@@ -23,6 +23,19 @@ use decdn_e2e::chain::ChainFixture;
 use decdn_incentive::payment_pool::PaymentPool;
 use decdn_incentive::{CapabilityGrant, Deployment, eth_identity, voucher_domain};
 
+/// The daemon process, killed and reaped if the test ends before it exits on
+/// its own, so a failed assertion never leaves a daemon running.
+struct Daemon(Option<std::process::Child>);
+
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
 /// Opened below the daemon's low-water mark, so the keeper tops it up.
 const OPEN_DEPOSIT: u64 = 1_000_000;
@@ -85,21 +98,24 @@ async fn daemon_binary_serves_tops_up_and_shuts_down() {
         l.local_addr().unwrap().port()
     };
     let base = format!("http://127.0.0.1:{port}");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_sponsord"))
-        .env_clear()
-        .env("SPONSORD_BIND", format!("127.0.0.1:{port}"))
-        .env("SPONSORD_API_TOKEN", TOKEN)
-        .env("SPONSORD_RPC_URL", chain.rpc_url())
-        .env("SPONSORD_CHAIN_ID", chain.chain_id().to_string())
-        .env("SPONSORD_PAYMENT_POOL_ADDR", pool_addr.to_string())
-        .env("SPONSORD_POOL_ID", pool_id.to_string())
-        .env("SPONSORD_TREASURY_KEYSTORE", &keystore)
-        .env("SPONSORD_TREASURY_PASSWORD", "pw")
-        .env("SPONSORD_POOL_LOW_WATER_MICRO_USDC", LOW_WATER.to_string())
-        .env("SPONSORD_POOL_REFILL_MICRO_USDC", REFILL.to_string())
-        .stdout(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut daemon = Daemon(Some(
+        Command::new(env!("CARGO_BIN_EXE_sponsord"))
+            .env_clear()
+            .env("SPONSORD_BIND", format!("127.0.0.1:{port}"))
+            .env("SPONSORD_API_TOKEN", TOKEN)
+            .env("SPONSORD_RPC_URL", chain.rpc_url())
+            .env("SPONSORD_CHAIN_ID", chain.chain_id().to_string())
+            .env("SPONSORD_PAYMENT_POOL_ADDR", pool_addr.to_string())
+            .env("SPONSORD_POOL_ID", pool_id.to_string())
+            .env("SPONSORD_TREASURY_KEYSTORE", &keystore)
+            .env("SPONSORD_TREASURY_PASSWORD", "pw")
+            .env("SPONSORD_POOL_LOW_WATER_MICRO_USDC", LOW_WATER.to_string())
+            .env("SPONSORD_POOL_REFILL_MICRO_USDC", REFILL.to_string())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    ));
+    let pid = daemon.0.as_ref().unwrap().id();
 
     // Up, and the keeper's first check has topped the pool up.
     let mut text = String::new();
@@ -148,10 +164,11 @@ async fn daemon_binary_serves_tops_up_and_shuts_down() {
 
     // SIGTERM: a clean exit.
     let status = Command::new("kill")
-        .args(["-TERM", &child.id().to_string()])
+        .args(["-TERM", &pid.to_string()])
         .status()
         .unwrap();
     assert!(status.success());
+    let mut child = daemon.0.take().unwrap();
     let exit = tokio::task::spawn_blocking(move || child.wait())
         .await
         .unwrap()

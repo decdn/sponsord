@@ -293,7 +293,7 @@ async fn metrics_need_no_token_and_count_issues_errors_and_the_pool() {
         },
         shutdown.clone(),
     ));
-    let app = router(ApiState::new(sponsor, Arc::from(TOKEN)));
+    let app = router(ApiState::new(sponsor.clone(), TOKEN.into()));
     send(&app, issue_req(Some(&bearer()), json!({"signer": SIGNER}))).await;
     send(
         &app,
@@ -301,8 +301,15 @@ async fn metrics_need_no_token_and_count_issues_errors_and_the_pool() {
     )
     .await;
     send(&app, issue_req(None, json!({"signer": SIGNER}))).await;
-    // The keeper checks the pool once right away.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // The keeper checks the pool once right away; wait for that check rather
+    // than for a fixed time, so a slow machine can't race it.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while sponsor.keeper_status().snapshot().last_check_unix == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the keeper's first check");
 
     let resp = app
         .clone()
