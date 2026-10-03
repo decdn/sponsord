@@ -93,8 +93,10 @@ pub trait Gate: Send + Sync {
 ```
 
 Build the onramp around yours the way its `main.rs` does: load an
-`OnrampConfig`, build `state::build(&cfg, daemon, Arc::new(YourGate))`, and
-serve `http::router(state)`. Everything else (installers, `/v1/profile`, the
+`OnrampConfig` with `ONRAMP_GATE=custom` (which drops the Turnstile settings
+from what is required), build `state::build(&cfg, daemon, Arc::new(YourGate))`,
+and serve `http::router(state)`. The stock `sponsord-onramp` binary refuses
+`custom`, since it has no gate of yours to run. Everything else (installers, `/v1/profile`, the
 hand-off, rate limits) stays as it is. `TurnstileGate`
 (`crates/sponsord-onramp/src/gate/turnstile.rs`) is a complete example.
 
@@ -119,8 +121,11 @@ tokio::spawn(sponsor.keeper(KeeperConfig { low_water, refill, interval }, shutdo
 let issued = sponsor.issue(user_key, &TermsRequest::default(), now_unix).await?;
 ```
 
-`signer` is any alloy signer that signs both typed data and transactions: a
-local `PrivateKeySigner`, or a remote signer such as AWS KMS or a Ledger.
+`signer` is any cloneable alloy signer that signs raw hashes and
+transactions: a local `PrivateKeySigner`, or a remote signer such as AWS or
+GCP KMS. Hardware wallets aren't supported yet: alloy's `LedgerSigner` signs
+only typed data and isn't `Clone` (tracked in
+[#26](https://github.com/decdn/sponsord/issues/26)).
 `Sponsor::connect` checks that it owns the pool on-chain. With a remote
 signer, re-issuing for a registered key gives an equally valid but not
 byte-identical token.

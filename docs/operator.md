@@ -51,8 +51,8 @@ on another host needs it.
 | `ONRAMP_DAEMON_TOKEN` / `_FILE` | required | The daemon's API token |
 | `ONRAMP_RPC_URL` | required | Public RPC endpoint users' `decdn` reads the chain through |
 | `ONRAMP_CAPACITY_BOND_ADDR` | required | `CapacityBond` contract, for node discovery |
-| `ONRAMP_TURNSTILE_SECRET` / `_FILE` | required | Cloudflare Turnstile secret |
-| `ONRAMP_TURNSTILE_SITEKEY` | required | Cloudflare Turnstile sitekey |
+| `ONRAMP_TURNSTILE_SECRET` / `_FILE` | required (Turnstile gate) | Cloudflare Turnstile secret |
+| `ONRAMP_TURNSTILE_SITEKEY` | required (Turnstile gate) | Cloudflare Turnstile sitekey |
 | `ONRAMP_DECDN_RELEASE`, `ONRAMP_DECDN_SUMS_SHA256` | required | `decdn` release the installers install, and the SHA-256 of its `SHA256SUMS` |
 | `ONRAMP_CLI_RELEASE`, `ONRAMP_CLI_SUMS_SHA256` | required | `decdn-sponsored` release, likewise (printed in its release notes) |
 | `ONRAMP_BIND` | `127.0.0.1:8080` | Listen address |
@@ -61,7 +61,7 @@ on another host needs it.
 | `ONRAMP_TTL_SECS` | daemon maximum | TTL requested per capability |
 | `ONRAMP_SLASH_JUDGE_ADDR` | none | `SlashJudge` contract, handed to `decdn` |
 | `ONRAMP_MIN_CLI_VERSION` | none | Oldest `decdn-sponsored` accepted; older ones are told to re-run the installer |
-| `ONRAMP_GATE` | `turnstile` | The gate |
+| `ONRAMP_GATE` | `turnstile` | The gate; `custom` only for programs that embed the onramp with their own (docs/integrator.md) |
 | `ONRAMP_BRAND_NAME` | `deCDN` | Name on the gate page |
 | `ONRAMP_GATE_TEMPLATE` | built-in | Your own gate page (below) |
 | `ONRAMP_CLIENT_IP_HEADER` | TCP peer | Header your reverse proxy puts the client address in |

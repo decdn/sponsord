@@ -32,8 +32,9 @@ You run two services next to a `PaymentPool` you fund:
 
 A capability lets one key spend up to its cap against your pool until it
 expires. Issuing one costs zero transactions and locks no deposit per user.
-Your loss is bounded by the gate, the per-capability cap, and the pool
-balance.
+Your loss is bounded by the gate, the per-capability cap, and the money
+behind the pool: its balance plus whatever the treasury wallet can still top
+it up with, since the daemon refills a drained pool automatically.
 
 ## Quickstart
 

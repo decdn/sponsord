@@ -23,9 +23,12 @@ Anyone who gets capabilities can spend, at most:
 
 - **per capability:** its cap (`SPONSORD_MAX_SPENDING_CAP_MICRO_USDC`, or
   the onramp's lower `ONRAMP_SPENDING_CAP_MICRO_USDC`), until its expiry;
-- **in total:** what's in the pool. The keeper tops it up by
-  `SPONSORD_POOL_REFILL_MICRO_USDC` whenever it falls below the low-water
-  mark, so what's in the treasury wallet is the real ceiling.
+- **in total:** the pool's remaining balance **plus** the treasury wallet's
+  USDC. The keeper tops the pool up by `SPONSORD_POOL_REFILL_MICRO_USDC`
+  every time it falls below the low-water mark, so a drained pool is
+  refilled from the wallet until the wallet runs out (or its gas does). Fund
+  the wallet with what you are willing to lose, and watch
+  `sponsord_pool_topups_total`.
 
 How many capabilities they can get is bounded by the gate, and on the onramp
 by the per-address rate limits (`ONRAMP_FUND_RATE_PER_MIN`).
