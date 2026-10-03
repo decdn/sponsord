@@ -2,8 +2,11 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use alloy::primitives::Address;
-use clap::{ArgGroup, Parser};
+use axum::http::HeaderName;
+use clap::{ArgGroup, Parser, ValueEnum};
 use sponsord_api::secret::Secret;
+
+use crate::net::ClientIpSource;
 
 use sponsord_api::MicroUsdc;
 use sponsord_api::daemon::Info;
@@ -102,6 +105,13 @@ pub struct Args {
     /// `CapacityBond` contract address, for node discovery.
     #[arg(long, env = "ONRAMP_CAPACITY_BOND_ADDR")]
     pub capacity_bond: Address,
+    /// `SlashJudge` contract address, handed to `decdn` when set.
+    #[arg(long, env = "ONRAMP_SLASH_JUDGE_ADDR")]
+    pub slash_judge: Option<Address>,
+    /// Oldest `decdn-sponsored` this onramp works with; older CLIs are told
+    /// to re-run the installer.
+    #[arg(long, env = "ONRAMP_MIN_CLI_VERSION")]
+    pub min_cli_version: Option<semver::Version>,
 
     /// Cap requested for each capability, in micro-USDC; unset takes the
     /// daemon's maximum.
@@ -111,6 +121,17 @@ pub struct Args {
     /// daemon's maximum.
     #[arg(long, env = "ONRAMP_TTL_SECS")]
     pub ttl_secs: Option<u64>,
+
+    /// What a person must pass to get a capability.
+    #[arg(long, env = "ONRAMP_GATE", value_enum, default_value_t = GateKind::Turnstile)]
+    pub gate: GateKind,
+    /// Name shown on the gate page.
+    #[arg(long, env = "ONRAMP_BRAND_NAME", default_value = "deCDN")]
+    pub brand_name: String,
+    /// HTML file to serve as the gate page instead of the built-in one; see
+    /// `assets/turnstile.html` for the placeholders it may use.
+    #[arg(long, env = "ONRAMP_GATE_TEMPLATE")]
+    pub gate_template: Option<PathBuf>,
 
     /// Cloudflare Turnstile server-side secret.
     #[arg(long, env = "ONRAMP_TURNSTILE_SECRET", hide_env_values = true)]
@@ -122,9 +143,19 @@ pub struct Args {
     #[arg(long, env = "ONRAMP_TURNSTILE_SITEKEY")]
     pub turnstile_sitekey: String,
 
-    /// Directory for the grant store.
-    #[arg(long, env = "ONRAMP_DATA_DIR", default_value = "./data")]
-    pub data_dir: PathBuf,
+    /// Header a trusted reverse proxy puts the client's address in (e.g.
+    /// `CF-Connecting-IP`, `X-Forwarded-For`). Unset uses the TCP peer. Set
+    /// it only when every request comes through that proxy.
+    #[arg(long, env = "ONRAMP_CLIENT_IP_HEADER")]
+    pub client_ip_header: Option<HeaderName>,
+    /// `POST /v1/fund` requests allowed per client address per minute; 0
+    /// disables the limit.
+    #[arg(long, env = "ONRAMP_FUND_RATE_PER_MIN", default_value_t = 10)]
+    pub fund_rate_per_min: u32,
+    /// `GET /v1/capability` polls allowed per client address per minute (the
+    /// CLI polls every 2 s); 0 disables the limit.
+    #[arg(long, env = "ONRAMP_POLL_RATE_PER_MIN", default_value_t = 120)]
+    pub poll_rate_per_min: u32,
 
     /// Where the installers download release binaries from:
     /// `<base>/<repo>/releases/download/<tag>/`.
@@ -151,6 +182,13 @@ pub struct Args {
     pub cli_sums_sha256: String,
 }
 
+/// The gates built in. More can be added by implementing `gate::Gate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum GateKind {
+    /// A Cloudflare Turnstile captcha.
+    Turnstile,
+}
+
 /// Resolved configuration.
 #[derive(Debug)]
 pub struct OnrampConfig {
@@ -162,13 +200,21 @@ pub struct OnrampConfig {
     /// Public RPC URL handed to end users.
     pub rpc_url: String,
     pub capacity_bond: Address,
+    pub slash_judge: Option<Address>,
+    pub min_cli_version: Option<semver::Version>,
     /// Cap requested for each capability; `None` takes the daemon maximum.
     pub spending_cap: Option<MicroUsdc>,
     /// TTL requested for each capability; `None` takes the daemon maximum.
     pub ttl_secs: Option<u64>,
+    pub gate: GateKind,
+    pub brand_name: String,
+    /// The gate page template, read at startup; `None` is the built-in one.
+    pub gate_template: Option<String>,
     pub turnstile_secret: Secret,
     pub turnstile_sitekey: String,
-    pub data_dir: PathBuf,
+    pub client_ip: ClientIpSource,
+    pub fund_rate_per_min: u32,
+    pub poll_rate_per_min: u32,
     /// Base URL of the release downloads, without a trailing `/`.
     pub releases_base: String,
     /// The `decdn/decdn` release the installers install `decdn` from.
@@ -190,7 +236,7 @@ impl OnrampConfig {
 
     /// # Errors
     ///
-    /// A secret file cannot be read, a URL is malformed or carries
+    /// A secret or template file cannot be read, a URL is malformed or carries
     /// characters the installer scripts can't hold, the sitekey isn't a
     /// plain token, or a release pin is malformed.
     pub fn from_args(args: Args) -> anyhow::Result<Self> {
@@ -218,6 +264,8 @@ impl OnrampConfig {
             )?,
             rpc_url: script_safe_url("ONRAMP_RPC_URL", &args.rpc_url)?,
             capacity_bond: args.capacity_bond,
+            slash_judge: args.slash_judge,
+            min_cli_version: args.min_cli_version,
             spending_cap: args.spending_cap,
             ttl_secs: args.ttl_secs,
             turnstile_secret: Secret::resolve(
@@ -226,7 +274,21 @@ impl OnrampConfig {
                 args.turnstile_secret_file.as_deref(),
             )?,
             turnstile_sitekey: args.turnstile_sitekey,
-            data_dir: args.data_dir,
+            gate: args.gate,
+            brand_name: args.brand_name,
+            gate_template: args
+                .gate_template
+                .map(|path| {
+                    std::fs::read_to_string(&path).map_err(|e| {
+                        anyhow::anyhow!("ONRAMP_GATE_TEMPLATE {}: {e}", path.display())
+                    })
+                })
+                .transpose()?,
+            client_ip: args
+                .client_ip_header
+                .map_or(ClientIpSource::Peer, ClientIpSource::Header),
+            fund_rate_per_min: args.fund_rate_per_min,
+            poll_rate_per_min: args.poll_rate_per_min,
             releases_base,
             decdn_release: ReleasePin::new(&args.decdn_release, &args.decdn_sums_sha256).map_err(
                 |e| anyhow::anyhow!("ONRAMP_DECDN_RELEASE/ONRAMP_DECDN_SUMS_SHA256: {e}"),
