@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
     let source: Arc<dyn CapabilitySource> = Arc::new(DaemonClient::new(
         &cfg.daemon_url,
-        cfg.daemon_token.expose().to_owned(),
+        cfg.daemon_token.clone(),
         http_client.clone(),
     ));
     let turnstile: Arc<dyn CaptchaVerifier> =

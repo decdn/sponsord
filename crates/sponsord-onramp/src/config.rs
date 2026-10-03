@@ -194,7 +194,7 @@ impl OnrampConfig {
     /// characters the installer scripts can't hold, the sitekey isn't a
     /// plain token, or a release pin is malformed.
     pub fn from_args(args: Args) -> anyhow::Result<Self> {
-        let releases_base = script_safe_url("ONRAMP_RELEASES_BASE", &args.releases_base)?;
+        let releases_base = base_url("ONRAMP_RELEASES_BASE", &args.releases_base)?;
         anyhow::ensure!(
             releases_base.starts_with("https://"),
             "ONRAMP_RELEASES_BASE must be an https URL"
@@ -209,7 +209,7 @@ impl OnrampConfig {
         );
         Ok(Self {
             bind: args.bind,
-            public_url: script_safe_url("ONRAMP_PUBLIC_URL", &args.public_url)?,
+            public_url: base_url("ONRAMP_PUBLIC_URL", &args.public_url)?,
             daemon_url: args.daemon_url,
             daemon_token: Secret::resolve(
                 "ONRAMP_DAEMON_TOKEN",
@@ -268,6 +268,18 @@ fn script_safe_url(name: &str, raw: &str) -> anyhow::Result<String> {
     Ok(s)
 }
 
+/// A [`script_safe_url`] that paths are appended to (routes, release
+/// downloads), so it may carry neither a query nor a fragment: either would
+/// swallow everything appended after it.
+fn base_url(name: &str, raw: &str) -> anyhow::Result<String> {
+    let url = reqwest::Url::parse(raw).map_err(|e| anyhow::anyhow!("{name}: {e}"))?;
+    anyhow::ensure!(
+        url.query().is_none() && url.fragment().is_none(),
+        "{name} must be a base URL, without a query or fragment"
+    );
+    script_safe_url(name, raw)
+}
+
 fn check_term(name: &str, value: Option<u64>, max: u64) -> anyhow::Result<()> {
     if let Some(v) = value {
         anyhow::ensure!(v > 0, "{name} must be above zero");
@@ -295,7 +307,10 @@ mod tests {
             ("--public-url", "https://up.example.org/"),
             ("--daemon-token", "tok"),
             ("--rpc-url", "https://rpc.example"),
-            ("--capacity-bond", "0x0000000000000000000000000000000000000002"),
+            (
+                "--capacity-bond",
+                "0x0000000000000000000000000000000000000002",
+            ),
             ("--turnstile-secret", "s"),
             ("--turnstile-sitekey", "0x4AAA-key_1"),
             ("--decdn-release", "v0.1.0"),
@@ -308,8 +323,8 @@ mod tests {
             flags.retain(|(f, _)| *f != flag);
             flags.push((flag, value));
         }
-        let argv = std::iter::once("sponsord-onramp")
-            .chain(flags.iter().flat_map(|(f, v)| [*f, *v]));
+        let argv =
+            std::iter::once("sponsord-onramp").chain(flags.iter().flat_map(|(f, v)| [*f, *v]));
         Args::try_parse_from(argv)
     }
 
@@ -346,6 +361,18 @@ mod tests {
         }
         let plain_http = args(&["--releases-base", "http://mirror.example"]).unwrap();
         assert!(OnrampConfig::from_args(plain_http).is_err());
+        // Paths are appended to these two, so a query or fragment would
+        // swallow them; the RPC URL may keep its query (an API key).
+        for (flag, bad) in [
+            ("--public-url", "https://up.example.org/?x=1"),
+            ("--public-url", "https://up.example.org/#x"),
+            ("--releases-base", "https://mirror.example/?mirror=x"),
+        ] {
+            let parsed = args(&[flag, bad]).unwrap();
+            assert!(OnrampConfig::from_args(parsed).is_err(), "{flag} {bad}");
+        }
+        let keyed_rpc = args(&["--rpc-url", "https://rpc.example/v2?key=abc"]).unwrap();
+        assert!(OnrampConfig::from_args(keyed_rpc).is_ok());
     }
 
     #[test]

@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let sponsor = Arc::new(Sponsor::connect(signer, chain, limits).await?);
     let shutdown = CancellationToken::new();
     tokio::spawn(sponsor.keeper(keeper, shutdown.clone()));
-    let app = http::router(ApiState::new(sponsor, Arc::from(api_token.expose())));
+    let app = http::router(ApiState::new(sponsor, api_token));
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(%bind, "sponsord listening");
     axum::serve(listener, app).await?;

@@ -13,7 +13,7 @@ workspace = true
 [features]
 # Typed HTTP clients: `DaemonClient` (for gates in front of the daemon) and
 # `OnrampClient` (for the CLI).
-client = ["dep:reqwest", "dep:tokio"]
+client = ["dep:reqwest", "dep:tokio", "secret"]
 # `IntoResponse` for `ErrorBody`, for servers built on axum.
 axum = ["dep:axum"]
 # `utoipa` schemas and the OpenAPI documents in `openapi`.

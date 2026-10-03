@@ -60,7 +60,7 @@ async fn build_refuses_an_unreachable_daemon_and_names_it() {
     cfg.daemon_url = "http://127.0.0.1:1".into();
     let source: Arc<dyn CapabilitySource> = Arc::new(DaemonClient::new(
         &cfg.daemon_url,
-        cfg.daemon_token.expose().to_owned(),
+        cfg.daemon_token.clone(),
         reqwest::Client::new(),
     ));
     let err = state::build(cfg, source, captcha()).await.err().unwrap();
