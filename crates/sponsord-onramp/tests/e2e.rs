@@ -42,7 +42,7 @@ async fn stack() -> (Router, Arc<FakePool>) {
     cfg.daemon_token = TOKEN.into();
     let source: Arc<dyn CapabilitySource> = Arc::new(DaemonClient::new(
         &cfg.daemon_url,
-        cfg.daemon_token.clone(),
+        cfg.daemon_token.expose().to_owned(),
         reqwest::Client::new(),
     ));
     let st =
