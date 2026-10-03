@@ -279,3 +279,54 @@ async fn failed_chain_read_is_503() {
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(v["error"], "chain_unavailable");
 }
+
+#[tokio::test]
+async fn metrics_need_no_token_and_count_issues_errors_and_the_pool() {
+    let (sponsor, _) = fake_sponsor(5_000_000, 172_800).await;
+    let sponsor = Arc::new(sponsor);
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let keeper = tokio::spawn(sponsor.keeper(
+        sponsord_core::KeeperConfig {
+            low_water: MicroUsdc(20_000_000),
+            refill: MicroUsdc(100_000_000),
+            interval: std::time::Duration::from_secs(3600),
+        },
+        shutdown.clone(),
+    ));
+    let app = router(ApiState::new(sponsor, Arc::from(TOKEN)));
+    send(&app, issue_req(Some(&bearer()), json!({"signer": SIGNER}))).await;
+    send(
+        &app,
+        issue_req(Some(&bearer()), json!({"signer": SIGNER, "ttl_secs": 0})),
+    )
+    .await;
+    send(&app, issue_req(None, json!({"signer": SIGNER}))).await;
+    // The keeper checks the pool once right away.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let resp = app
+        .clone()
+        .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    for line in [
+        "sponsord_capabilities_issued_total{registered=\"false\"} 1",
+        "sponsord_capabilities_issued_total{registered=\"true\"} 0",
+        "sponsord_request_errors_total{code=\"zero\"} 1",
+        "sponsord_request_errors_total{code=\"unauthorized\"} 1",
+        "sponsord_pool_remaining_micro_usdc 100000000",
+        "sponsord_pool_topups_total 0",
+    ] {
+        assert!(
+            text.lines().any(|l| l == line),
+            "missing {line:?} in\n{text}"
+        );
+    }
+    shutdown.cancel();
+    keeper.await.unwrap();
+}
