@@ -56,9 +56,15 @@ async fn daemon_binary_serves_tops_up_and_shuts_down() {
         .unwrap();
     let provider = chain.provider_for(&signer);
     let pool_addr = chain.addrs().payment_pool;
-    ensure_allowance(&provider, chain.usdc(), owner, pool_addr, Some(U256::from(OPEN_DEPOSIT)))
-        .await
-        .unwrap();
+    ensure_allowance(
+        &provider,
+        chain.usdc(),
+        owner,
+        pool_addr,
+        Some(U256::from(OPEN_DEPOSIT)),
+    )
+    .await
+    .unwrap();
     let opened = open_pool(
         &PaymentPool::new(pool_addr, provider),
         Arc::new(signer.clone()),
@@ -108,7 +114,10 @@ async fn daemon_binary_serves_tops_up_and_shuts_down() {
     }
     assert!(text.contains("sponsord_pool_topups_total 1"), "{text}");
     assert!(
-        text.contains(&format!("sponsord_pool_remaining_micro_usdc {}", OPEN_DEPOSIT + REFILL)),
+        text.contains(&format!(
+            "sponsord_pool_remaining_micro_usdc {}",
+            OPEN_DEPOSIT + REFILL
+        )),
         "{text}"
     );
 
