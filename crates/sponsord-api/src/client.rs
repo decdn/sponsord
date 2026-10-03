@@ -26,12 +26,21 @@ pub enum DaemonError {
     Unavailable(String),
 }
 
-/// Client for the daemon's bearer-token API.
-#[derive(Clone, Debug)]
+/// Client for the daemon's bearer-token API. `Debug` leaves the token out.
+#[derive(Clone)]
 pub struct DaemonClient {
     base: String,
     token: String,
     http: reqwest::Client,
+}
+
+impl std::fmt::Debug for DaemonClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DaemonClient")
+            .field("base", &self.base)
+            .field("token", &"<redacted>")
+            .finish_non_exhaustive()
+    }
 }
 
 impl DaemonClient {
@@ -98,9 +107,13 @@ async fn parse<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Resul
     let body: Option<ErrorBody> = resp.json().await.ok();
     let code = body.map_or(ErrorCode::Unknown, |b| b.error);
     match code {
-        ErrorCode::SignerExpired => Err(DaemonError::SignerExpired {
-            expiry: body.and_then(|b| b.expiry).unwrap_or(0),
-        }),
+        // The daemon sends `signer_expired` only with 409; the same code under
+        // another status is a daemon fault, not a verdict on the signer.
+        ErrorCode::SignerExpired if status == reqwest::StatusCode::CONFLICT => {
+            Err(DaemonError::SignerExpired {
+                expiry: body.and_then(|b| b.expiry).unwrap_or(0),
+            })
+        }
         _ if status.is_client_error() => Err(DaemonError::Rejected {
             status: status.as_u16(),
             code,
@@ -180,7 +193,8 @@ impl OnrampClient {
     }
 
     /// Poll [`capability`](Self::capability) every `every` until a token
-    /// appears or `timeout` elapses.
+    /// appears or `timeout` elapses. The timeout bounds the whole poll,
+    /// including a request in flight.
     ///
     /// # Errors
     ///
@@ -191,16 +205,17 @@ impl OnrampClient {
         every: Duration,
         timeout: Duration,
     ) -> Result<String, OnrampError> {
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            if let Some(token) = self.capability(client).await? {
-                return Ok(token);
+        let poll = async {
+            loop {
+                if let Some(token) = self.capability(client).await? {
+                    return Ok(token);
+                }
+                tokio::time::sleep(every).await;
             }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(OnrampError::Timeout(timeout));
-            }
-            tokio::time::sleep(every).await;
-        }
+        };
+        tokio::time::timeout(timeout, poll)
+            .await
+            .map_err(|_| OnrampError::Timeout(timeout))?
     }
 
     /// The gate page for `client`, for a person to open in a browser.
@@ -311,6 +326,23 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, DaemonError::SignerExpired { expiry: 1_000 }));
+    }
+
+    #[tokio::test]
+    async fn signer_expired_outside_a_409_is_not_a_verdict_on_the_signer() {
+        let server = mock_issue(500, json!({"error": "signer_expired", "expiry": 1_000})).await;
+        let err = daemon(&server.uri())
+            .issue(&IssueRequest::new(SIGNER))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DaemonError::Unavailable(_)), "{err}");
+    }
+
+    #[test]
+    fn debug_leaves_the_token_out() {
+        let shown = format!("{:?}", daemon("http://d"));
+        assert!(!shown.contains("tok\""), "{shown}");
+        assert!(shown.contains("<redacted>"));
     }
 
     #[tokio::test]
@@ -425,6 +457,27 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, OnrampError::Timeout(_)));
+    }
+
+    #[tokio::test]
+    async fn poll_timeout_bounds_a_request_in_flight() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(onramp::routes::CAPABILITY))
+            .respond_with(ResponseTemplate::new(204).set_delay(Duration::from_secs(30)))
+            .mount(&server)
+            .await;
+        let started = std::time::Instant::now();
+        let err = onramp(&server.uri())
+            .poll_capability(
+                SIGNER,
+                Duration::from_millis(10),
+                Duration::from_millis(200),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, OnrampError::Timeout(_)));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[tokio::test]

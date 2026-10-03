@@ -55,7 +55,7 @@
         "parameters": [
           {
             "name": "client",
-            "in": "path",
+            "in": "query",
             "description": "The download key's address.",
             "required": true,
             "schema": {
@@ -114,7 +114,7 @@
         "parameters": [
           {
             "name": "client",
-            "in": "path",
+            "in": "query",
             "description": "The download key's address.",
             "required": true,
             "schema": {

@@ -28,6 +28,7 @@ pub mod routes {
 /// The `?client=0x..` query of `GET /fund` and `GET /v1/capability`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
+#[cfg_attr(feature = "openapi", into_params(parameter_in = Query))]
 pub struct ClientQuery {
     /// The download key's address.
     #[cfg_attr(feature = "openapi", param(value_type = String))]
