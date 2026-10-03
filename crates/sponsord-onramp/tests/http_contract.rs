@@ -350,15 +350,39 @@ async fn fund_and_poll_are_rate_limited_per_client_address() {
 async fn the_client_address_can_come_from_a_proxy_header() {
     let mut config = test_config();
     config.client_ip = ClientIpSource::Header("x-forwarded-for".parse().unwrap());
+    config.fund_rate_per_min = 1;
     let (state, fakes) = app_state_with_options(FakeOptions {
         config,
         ..FakeOptions::default()
     })
     .await;
     let app = sponsord_onramp::http::router(state);
-    let mut req = from_peer(fund(), "10.0.0.1");
-    req.headers_mut()
-        .insert("x-forwarded-for", "198.51.100.9, 10.0.0.1".parse().unwrap());
-    assert_eq!(send(&app, req).await.0, StatusCode::OK);
-    assert_eq!(fakes.gate.last_ip(), Some("198.51.100.9".parse().unwrap()));
+
+    // The proxy appends the real peer; whatever the client put before it is
+    // ignored, so a spoofed left-hand address neither names the client nor
+    // buys it a fresh rate-limit budget.
+    for spoofed in ["192.0.2.1", "192.0.2.2"] {
+        let mut req = from_peer(fund(), "10.0.0.1");
+        req.headers_mut().insert(
+            "x-forwarded-for",
+            format!("{spoofed}, 198.51.100.9").parse().unwrap(),
+        );
+        let status = send(&app, req).await.0;
+        assert_eq!(fakes.gate.last_ip(), Some("198.51.100.9".parse().unwrap()));
+        if spoofed == "192.0.2.1" {
+            assert_eq!(status, StatusCode::OK);
+        } else {
+            assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+
+    // Without the header, the TCP peer is the client: still limited.
+    assert_eq!(
+        send(&app, from_peer(fund(), "10.0.0.7")).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(&app, from_peer(fund(), "10.0.0.7")).await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
 }

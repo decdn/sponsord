@@ -143,9 +143,10 @@ pub struct Args {
     #[arg(long, env = "ONRAMP_TURNSTILE_SITEKEY")]
     pub turnstile_sitekey: String,
 
-    /// Header a trusted reverse proxy puts the client's address in (e.g.
-    /// `CF-Connecting-IP`, `X-Forwarded-For`). Unset uses the TCP peer. Set
-    /// it only when every request comes through that proxy.
+    /// Header the trusted reverse proxy in front of the onramp puts the
+    /// client's address in (e.g. `CF-Connecting-IP`, `X-Forwarded-For`; of a
+    /// list, the right-most address counts). Unset uses the TCP peer. Set it
+    /// only when every request comes through exactly that one proxy.
     #[arg(long, env = "ONRAMP_CLIENT_IP_HEADER")]
     pub client_ip_header: Option<HeaderName>,
     /// `POST /v1/fund` requests allowed per client address per minute; 0

@@ -17,9 +17,12 @@ pub enum ClientIpSource {
     /// The TCP peer: right when nothing sits in front of the onramp.
     #[default]
     Peer,
-    /// A header a trusted reverse proxy sets, e.g. `CF-Connecting-IP` or
-    /// `X-Forwarded-For` (its first address is used). Only safe when every
-    /// request comes through that proxy, since clients can set it too.
+    /// A header the trusted reverse proxy in front of the onramp sets, e.g.
+    /// `CF-Connecting-IP` or `X-Forwarded-For`. Of a list, the right-most
+    /// address is used: the one that proxy appended. Anything to its left
+    /// came from the client and is ignored. A request without the header
+    /// falls back to the TCP peer. Only safe when every request comes
+    /// through exactly that one proxy.
     Header(HeaderName),
 }
 
@@ -34,17 +37,21 @@ impl FromRequestParts<AppState> for ClientIp {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        let peer = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|ConnectInfo(addr)| addr.ip());
         let ip = match &state.client_ip {
-            ClientIpSource::Peer => parts
-                .extensions
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|ConnectInfo(addr)| addr.ip()),
+            ClientIpSource::Peer => peer,
             ClientIpSource::Header(name) => parts
                 .headers
-                .get(name)
+                .get_all(name)
+                .iter()
+                .next_back()
                 .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.split(',').next())
-                .and_then(|v| v.trim().parse().ok()),
+                .and_then(|v| v.rsplit(',').next())
+                .and_then(|v| v.trim().parse().ok())
+                .or(peer),
         };
         Ok(Self(ip))
     }
