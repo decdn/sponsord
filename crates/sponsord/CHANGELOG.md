@@ -40,3 +40,10 @@ release.
   `github.com/decdn/decdn`, at the commit `Cargo.lock` pins
   (`7f938e6b8437eba614e54375dcbc504de108379d`); `decdn.ref` and the sibling
   checkout are gone.
+
+### Fixed
+
+- **systemd unit on systemd 255.** `deploy/systemd/sponsord.service` copies
+  the keystore credential to a `0600` file under `/run/sponsord` before start.
+  systemd 255 loads credentials at `0440`, which the daemon refused as an
+  insecure keystore ([#36](https://github.com/decdn/sponsord/issues/36)).

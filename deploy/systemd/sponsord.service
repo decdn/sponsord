@@ -17,7 +17,13 @@ LoadCredential=treasury-password:/etc/sponsord/treasury-password
 LoadCredential=treasury-keystore.json:/etc/sponsord/treasury-keystore.json
 Environment=SPONSORD_API_TOKEN_FILE=%d/api-token
 Environment=SPONSORD_TREASURY_PASSWORD_FILE=%d/treasury-password
-Environment=SPONSORD_TREASURY_KEYSTORE=%d/treasury-keystore.json
+# Newer systemd (255+) loads credentials at 0440, and the daemon refuses a
+# keystore its group can read. Copy it to a private 0600 file first; it is
+# still the encrypted keystore, and the password stays in %d.
+RuntimeDirectory=sponsord
+RuntimeDirectoryMode=0700
+ExecStartPre=/usr/bin/install -m 0600 %d/treasury-keystore.json %t/sponsord/treasury-keystore.json
+Environment=SPONSORD_TREASURY_KEYSTORE=%t/sponsord/treasury-keystore.json
 DynamicUser=yes
 Restart=on-failure
 RestartSec=5s
