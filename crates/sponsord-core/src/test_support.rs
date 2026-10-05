@@ -38,6 +38,7 @@ pub struct FakePool {
     owner: Address,
     remaining: Mutex<MicroUsdc>,
     registrations: Mutex<HashMap<Address, Authorization>>,
+    fail_remaining: AtomicBool,
     fail_authorization: AtomicBool,
     fail_top_up: AtomicBool,
 }
@@ -49,6 +50,7 @@ impl FakePool {
             owner,
             remaining: Mutex::new(MicroUsdc(remaining)),
             registrations: Mutex::new(HashMap::new()),
+            fail_remaining: AtomicBool::new(false),
             fail_authorization: AtomicBool::new(false),
             fail_top_up: AtomicBool::new(false),
         }
@@ -57,6 +59,11 @@ impl FakePool {
     /// Record `signer` as registered on-chain with `auth`.
     pub fn register(&self, signer: Address, auth: Authorization) {
         self.registrations.lock().unwrap().insert(signer, auth);
+    }
+
+    /// Make every `remaining` read fail (an RPC outage).
+    pub fn fail_remaining_reads(&self, fail: bool) {
+        self.fail_remaining.store(fail, Ordering::SeqCst);
     }
 
     /// Make every `authorization` read fail (an RPC outage).
@@ -82,6 +89,10 @@ impl PoolChain for FakePool {
         self.owner
     }
     async fn remaining(&self, _pool_id: B256) -> anyhow::Result<MicroUsdc> {
+        anyhow::ensure!(
+            !self.fail_remaining.load(Ordering::SeqCst),
+            "remaining read failed: error sending request for url ({FAKE_RPC_URL})"
+        );
         Ok(self.remaining_now())
     }
     async fn top_up(&self, _pool_id: B256, additional: MicroUsdc) -> anyhow::Result<MicroUsdc> {

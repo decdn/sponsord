@@ -213,6 +213,28 @@ mod tests {
         assert!(!text.contains("rpc.example"), "{text}");
     }
 
+    #[tokio::test]
+    async fn a_failed_remaining_read_is_counted_and_logged_without_the_url() {
+        let pool = FakePool::new(Address::repeat_byte(1), 0);
+        pool.fail_remaining_reads(true);
+        let status = KeeperStatus::default();
+        let log = CapturedLog::default();
+        {
+            let _guard = log.install();
+            sweep(&pool, TEST_POOL_ID, &CFG, &status, &FixedClock::new(1)).await;
+        }
+        let s = status.snapshot();
+        assert_eq!((s.topups, s.failures, s.last_check_unix), (0, 1, 0));
+        assert_eq!(pool.remaining_now(), MicroUsdc(0), "no top-up was sent");
+
+        // The warning keeps the cause but not the RPC URL (#38).
+        let text = log.text();
+        assert!(text.contains("pool remaining read failed"), "{text}");
+        assert!(text.contains("error sending request"), "{text}");
+        assert!(!text.contains("FAKE-RPC-KEY"), "{text}");
+        assert!(!text.contains("rpc.example"), "{text}");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_cancelled_keeper_starts_no_sweep_even_with_a_tick_ready() {
         let pool = Arc::new(FakePool::new(Address::repeat_byte(1), 0));
