@@ -42,6 +42,7 @@ pub mod sponsor;
 
 pub use issuer::{Issuer, Limits, Terms, TermsError, TermsRequest};
 pub use keeper::{KeeperConfig, KeeperSnapshot, KeeperStatus};
+pub use pool::TxState;
 pub use sponsor::{ChainConfig, Sponsor, SponsorError};
 pub use sponsord_api::{IssuedCapability, MicroUsdc};
 

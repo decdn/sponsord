@@ -28,6 +28,9 @@ release.
   (`ChainPool::connect`), `pool_watch` → `keeper`, `FakeTreasury` → `FakePool`.
 - **Keeper.** `Sponsor::keeper(KeeperConfig, CancellationToken)` runs until
   cancelled; `Sponsor::keeper_status()` reports what it has seen and done.
+- **`PoolChain` reads transactions.** Implementors add `transaction(TxHash)
+  -> TxState` and `confirmed_nonce()`, which the keeper uses to settle an
+  unconfirmed top-up. `KeeperSnapshot` gains `topup_unconfirmed_since_unix`.
 
 ### Changed
 
@@ -40,6 +43,17 @@ release.
 
 - **Published as its own crate.** Versioned and released independently of the
   binaries, with crates.io metadata, dual-licensed MIT OR Apache-2.0.
+
+### Fixed
+
+- **No second top-up while one may still mine.** When a `topUp` was broadcast
+  but its receipt could not be read (decdn's `TopUpUnconfirmed`), the keeper
+  used to send another one at the next tick, so both could mine and the
+  treasury paid two refills. It now holds further top-ups until that
+  transaction mines or reverts, or its nonce is used by another transaction,
+  and logs the hash at `error`. If the RPC node never returns the
+  transaction, the hold stays until a restart
+  ([#40](https://github.com/decdn/sponsord/issues/40)).
 
 ### Security
 

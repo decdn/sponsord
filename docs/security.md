@@ -28,7 +28,9 @@ Anyone who gets capabilities can spend, at most:
   every time it falls below the low-water mark, so a drained pool is
   refilled from the wallet until the wallet runs out (or its gas does). Fund
   the wallet with what you are willing to lose, and watch
-  `sponsord_pool_topups_total`.
+  `sponsord_pool_topups_total`. A top-up whose receipt could not be read
+  holds the next one until it mines or is replaced, so one refill is not
+  sent twice.
 
 How many capabilities they can get is bounded by the gate, and on the onramp
 by the per-address rate limits (`ONRAMP_FUND_RATE_PER_MIN`).

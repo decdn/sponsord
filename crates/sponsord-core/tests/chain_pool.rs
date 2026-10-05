@@ -16,13 +16,13 @@
 
 use std::sync::Arc;
 
-use alloy::primitives::U256;
+use alloy::primitives::{TxHash, U256};
 use alloy::signers::local::PrivateKeySigner;
 use decdn_client::buyer_pool::{ensure_allowance, open_pool};
 use decdn_e2e::chain::ChainFixture;
-use decdn_incentive::Deployment;
 use decdn_incentive::payment_pool::PaymentPool;
-use sponsord_core::pool::{ChainPool, PoolChain};
+use decdn_incentive::{Deployment, Erc20};
+use sponsord_core::pool::{ChainPool, PoolChain, TxState};
 use sponsord_core::{ChainConfig, Limits, MicroUsdc, Sponsor, TermsRequest};
 
 /// Opening deposit, in USDC base units (6 decimals), well above the top-up
@@ -96,6 +96,27 @@ async fn remaining_grows_after_topup() {
         .unwrap();
     let after = pool.remaining(pool_id).await.unwrap();
     assert_eq!(after.0, before.0 + credited.0);
+
+    // What the keeper reads to settle an unconfirmed top-up: a mined tx, a
+    // hash the node never saw, and the treasury's confirmed nonce (approve,
+    // openPool, approve, topUp so far).
+    let approve = Erc20::new(chain.usdc(), chain.provider_for(&signer))
+        .approve(chain.addrs().payment_pool, U256::ZERO)
+        .send()
+        .await
+        .unwrap()
+        .watch()
+        .await
+        .unwrap();
+    assert_eq!(
+        pool.transaction(approve).await.unwrap(),
+        TxState::Mined { success: true }
+    );
+    assert_eq!(
+        pool.transaction(TxHash::repeat_byte(0x99)).await.unwrap(),
+        TxState::Unknown
+    );
+    assert!(pool.confirmed_nonce().await.unwrap() >= 4);
 
     // A signer that never redeemed is unregistered.
     assert_eq!(

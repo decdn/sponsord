@@ -1,11 +1,14 @@
 //! `PoolChain`: the on-chain `PaymentPool` operations the sponsor needs. It
 //! reads the pool's remaining balance, tops the pool up from the treasury
 //! (the hot wallet that owns the pool), reads the pool's owner (a boot-time
-//! sanity check), and reads a signer's registration. `ChainPool` backs it in
-//! production; tests use `test_support::FakePool`.
+//! sanity check), and reads a signer's registration. It also reads where a
+//! broadcast transaction stands and the treasury's confirmed nonce, which
+//! the keeper uses to settle a top-up it could not confirm. `ChainPool`
+//! backs it in production; tests use `test_support::FakePool`.
 
+use alloy::consensus::Transaction as _;
 use alloy::network::{EthereumWallet, TxSigner};
-use alloy::primitives::{Address, B256, Signature, U256};
+use alloy::primitives::{Address, B256, Signature, TxHash, U256};
 use alloy::providers::{DynProvider, Provider, ProviderBuilder};
 use async_trait::async_trait;
 use decdn_client::buyer_pool::{AllowanceShortfall, TopUpUnconfirmed, ensure_allowance, top_up};
@@ -69,6 +72,19 @@ fn redacted_top_up(context: String, err: &anyhow::Error) -> anyhow::Error {
     out.context(context)
 }
 
+/// Where a broadcast transaction stands, as the RPC node sees it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TxState {
+    /// A receipt exists; `success` is its status (a reverted `topUp` moved
+    /// nothing).
+    Mined { success: bool },
+    /// The node knows the transaction but has no receipt for it yet.
+    Pending { nonce: u64 },
+    /// The node has neither the transaction nor a receipt: it was dropped,
+    /// replaced, or never reached this node.
+    Unknown,
+}
+
 /// The contract's unregistered state is a zero cap and zero expiry
 /// (`PaymentPool._registerCapability`); anything else is a registration.
 fn registration(cap: u64, expiry: u64) -> Option<Authorization> {
@@ -101,6 +117,13 @@ pub trait PoolChain: Send + Sync {
         pool_id: B256,
         signer: Address,
     ) -> anyhow::Result<Option<Authorization>>;
+
+    /// Where the transaction `tx` stands.
+    async fn transaction(&self, tx: TxHash) -> anyhow::Result<TxState>;
+
+    /// The treasury's confirmed transaction count (its nonce at the latest
+    /// block): every nonce below it has been used by a mined transaction.
+    async fn confirmed_nonce(&self) -> anyhow::Result<u64>;
 }
 
 /// The `PaymentPool` contract, read through and paid into by the treasury
@@ -214,6 +237,35 @@ impl PoolChain for ChainPool {
                 anyhow::anyhow!("getAuthorization({pool_id}, {signer}): {}", redacted(&e))
             })?;
         Ok(registration(a.cap, a.expiry))
+    }
+
+    async fn transaction(&self, tx: TxHash) -> anyhow::Result<TxState> {
+        let receipt = self
+            .provider
+            .get_transaction_receipt(tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("read receipt of {tx}: {}", redacted(&e)))?;
+        if let Some(r) = receipt {
+            return Ok(TxState::Mined {
+                success: r.status(),
+            });
+        }
+        // A transaction with a block but no receipt yet is reported pending;
+        // the next read sees its receipt.
+        let found = self
+            .provider
+            .get_transaction_by_hash(tx)
+            .await
+            .map_err(|e| anyhow::anyhow!("read transaction {tx}: {}", redacted(&e)))?;
+        Ok(found.map_or(TxState::Unknown, |t| TxState::Pending { nonce: t.nonce() }))
+    }
+
+    async fn confirmed_nonce(&self) -> anyhow::Result<u64> {
+        self.provider
+            .get_transaction_count(self.owner)
+            .latest()
+            .await
+            .map_err(|e| anyhow::anyhow!("read the treasury's nonce: {}", redacted(&e)))
     }
 }
 
@@ -366,6 +418,8 @@ mod tests {
             pool.top_up(id, MicroUsdc(1)).await.err().unwrap(),
             pool.pool_owner(id).await.err().unwrap(),
             pool.authorization(id, owner).await.err().unwrap(),
+            pool.transaction(TxHash::ZERO).await.err().unwrap(),
+            pool.confirmed_nonce().await.err().unwrap(),
         ];
         for err in errors {
             let err = format!("{err:#}");

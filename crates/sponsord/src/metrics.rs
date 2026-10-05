@@ -67,7 +67,7 @@ impl Metrics {
                 let _ = writeln!(out, "sponsord_request_errors_total{{code=\"{code}\"}} {n}");
             }
         }
-        let gauges: [(&str, &str, &str, u64); 5] = [
+        let gauges: [(&str, &str, &str, u64); 6] = [
             (
                 "sponsord_pool_remaining_micro_usdc",
                 "gauge",
@@ -95,8 +95,15 @@ impl Metrics {
             (
                 "sponsord_pool_keeper_failures_total",
                 "counter",
-                "Failed balance reads and top-ups.",
+                "Failed balance reads, top-ups, and checks of an unconfirmed top-up.",
                 pool.failures,
+            ),
+            (
+                "sponsord_pool_topup_unconfirmed_since_unix",
+                "gauge",
+                "Unix time a top-up came back unconfirmed; no top-up is sent until it mines \
+                 or is replaced (0: none held).",
+                pool.topup_unconfirmed_since_unix,
             ),
         ];
         for (name, kind, help, value) in gauges {
