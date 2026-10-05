@@ -283,9 +283,10 @@ async fn settle(
             _ => {
                 tracing::error!(
                     pool = %pool_id, %tx, held_secs,
-                    "the RPC node does not know pool top-up {tx}; holding further \
-                     top-ups. Check whether it mined, then restart sponsord to clear \
-                     the hold"
+                    "the RPC node does not know pool top-up {tx}, which may still be \
+                     pending elsewhere; holding further top-ups. Restart sponsord to \
+                     clear the hold only once the tx has mined or its nonce has been \
+                     used by another transaction"
                 );
                 Settled::Held
             }
@@ -517,7 +518,10 @@ mod tests {
         assert_eq!(pool.top_up_calls(), 1);
         assert_eq!(status.snapshot().topup_unconfirmed_since_unix, 1_000);
         let text = log.text();
-        assert!(text.contains("restart sponsord"), "{text}");
+        assert!(
+            text.contains("clear the hold only once the tx has mined"),
+            "{text}"
+        );
     }
 
     #[tokio::test]

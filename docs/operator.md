@@ -139,7 +139,7 @@ For a different kind of check, see [integrator.md](integrator.md).
 | `sponsord_pool_last_check_unix` | gauge | Last successful balance read |
 | `sponsord_pool_last_topup_unix` | gauge | Last successful top-up |
 | `sponsord_pool_topups_total` | counter | Successful top-ups |
-| `sponsord_pool_keeper_failures_total` | counter | Failed balance reads and top-ups |
+| `sponsord_pool_keeper_failures_total` | counter | Failed balance reads, top-ups, and checks of an unconfirmed top-up |
 | `sponsord_pool_topup_unconfirmed_since_unix` | gauge | When a top-up came back unconfirmed and further top-ups were held (0: none) |
 
 Alert on `sponsord_pool_keeper_failures_total` rising (the treasury wallet
@@ -151,9 +151,11 @@ It means the keeper broadcast a `topUp` but could not read its receipt, so it
 sends no other top-up until that transaction mines or its nonce is used by
 another one. Otherwise the pool could be refilled twice. The `error` log line
 names the transaction. The hold clears by itself in most cases. If the log
-says the RPC node does not know the transaction, look it up on a block
-explorer, then restart `sponsord` to clear the hold. Restart only after the
-transaction has mined or been replaced, because a restart forgets the hold.
+says the RPC node does not know the transaction, it may still be pending
+on other nodes. Restart `sponsord` to clear the hold only once a block
+explorer shows that the transaction mined, or that another transaction from
+the treasury used its nonce. A restart forgets the hold, so restarting
+earlier can refill the pool twice.
 
 ## 6. Upgrades
 
