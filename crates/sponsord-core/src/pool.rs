@@ -75,14 +75,34 @@ fn redacted_top_up(context: String, err: &anyhow::Error) -> anyhow::Error {
 /// Where a broadcast transaction stands, as the RPC node sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TxState {
-    /// A receipt exists; `success` is its status (a reverted `topUp` moved
-    /// nothing).
-    Mined { success: bool },
+    /// It mined and succeeded.
+    Mined,
+    /// It mined and reverted, so it moved nothing.
+    Reverted,
     /// The node knows the transaction but has no receipt for it yet.
     Pending { nonce: u64 },
     /// The node has neither the transaction nor a receipt: it was dropped,
     /// replaced, or never reached this node.
     Unknown,
+}
+
+/// A provider that sends as `signer` over `url`. Each transaction's nonce is
+/// the node's pending count for the treasury, read when it is sent, rather
+/// than alloy's default cached count, which never re-syncs: after a dropped
+/// transaction it would leave every later one queued behind the unused
+/// nonce, and after a transaction sent from elsewhere (the self-transfers
+/// that clear a held top-up) it would reuse a spent nonce.
+fn treasury_provider<S>(url: alloy::transports::http::reqwest::Url, signer: S) -> DynProvider
+where
+    S: TxSigner<Signature> + Send + Sync + 'static,
+{
+    ProviderBuilder::default()
+        .with_gas_estimation()
+        .with_simple_nonce_management()
+        .fetch_chain_id()
+        .wallet(EthereumWallet::new(signer))
+        .connect_http(url)
+        .erased()
 }
 
 /// The contract's unregistered state is a zero cap and zero expiry
@@ -124,6 +144,10 @@ pub trait PoolChain: Send + Sync {
     /// The treasury's confirmed transaction count (its nonce at the latest
     /// block): every nonce below it has been used by a mined transaction.
     async fn confirmed_nonce(&self) -> anyhow::Result<u64>;
+
+    /// The treasury's transaction count including the RPC node's pending
+    /// pool: the nonce its next transaction gets.
+    async fn pending_nonce(&self) -> anyhow::Result<u64>;
 }
 
 /// The `PaymentPool` contract, read through and paid into by the treasury
@@ -158,10 +182,7 @@ impl ChainPool {
                 rpc_url.len()
             )
         })?;
-        let provider = ProviderBuilder::new()
-            .wallet(EthereumWallet::new(signer))
-            .connect_http(url)
-            .erased();
+        let provider = treasury_provider(url, signer);
         let contract = PaymentPool::new(payment_pool, provider.clone());
         let token = contract
             .usdc()
@@ -246,8 +267,10 @@ impl PoolChain for ChainPool {
             .await
             .map_err(|e| anyhow::anyhow!("read receipt of {tx}: {}", redacted(&e)))?;
         if let Some(r) = receipt {
-            return Ok(TxState::Mined {
-                success: r.status(),
+            return Ok(if r.status() {
+                TxState::Mined
+            } else {
+                TxState::Reverted
             });
         }
         // A transaction with a block but no receipt yet is reported pending;
@@ -266,6 +289,14 @@ impl PoolChain for ChainPool {
             .latest()
             .await
             .map_err(|e| anyhow::anyhow!("read the treasury's nonce: {}", redacted(&e)))
+    }
+
+    async fn pending_nonce(&self) -> anyhow::Result<u64> {
+        self.provider
+            .get_transaction_count(self.owner)
+            .pending()
+            .await
+            .map_err(|e| anyhow::anyhow!("read the treasury's pending nonce: {}", redacted(&e)))
     }
 }
 
@@ -401,10 +432,7 @@ mod tests {
         let url = format!("http://127.0.0.1:{port}/v3/SECRET-API-KEY");
         let signer = PrivateKeySigner::random();
         let owner = signer.address();
-        let provider = ProviderBuilder::new()
-            .wallet(EthereumWallet::new(signer))
-            .connect_http(url.parse().unwrap())
-            .erased();
+        let provider = treasury_provider(url.parse().unwrap(), signer);
         let pool = ChainPool {
             contract: PaymentPool::new(Address::ZERO, provider.clone()),
             provider,
@@ -420,6 +448,7 @@ mod tests {
             pool.authorization(id, owner).await.err().unwrap(),
             pool.transaction(TxHash::ZERO).await.err().unwrap(),
             pool.confirmed_nonce().await.err().unwrap(),
+            pool.pending_nonce().await.err().unwrap(),
         ];
         for err in errors {
             let err = format!("{err:#}");

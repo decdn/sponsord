@@ -95,14 +95,14 @@ impl Metrics {
             (
                 "sponsord_pool_keeper_failures_total",
                 "counter",
-                "Failed balance reads, top-ups, and checks of an unconfirmed top-up.",
+                "Failed chain reads and top-ups.",
                 pool.failures,
             ),
             (
                 "sponsord_pool_topup_unconfirmed_since_unix",
                 "gauge",
-                "Unix time a top-up came back unconfirmed; no top-up is sent until it mines \
-                 or is replaced (0: none held).",
+                "Unix time a top-up came back unconfirmed, while further top-ups are held \
+                 for it (0: none held).",
                 pool.topup_unconfirmed_since_unix,
             ),
         ];

@@ -48,7 +48,8 @@ pub struct FakePool {
     unconfirm_top_up: AtomicBool,
     fail_tx_reads: AtomicBool,
     tx_state: Mutex<TxState>,
-    confirmed_nonce: AtomicU64,
+    pub(crate) confirmed_nonce: AtomicU64,
+    pending_nonce: AtomicU64,
     top_up_calls: AtomicU64,
 }
 
@@ -66,6 +67,7 @@ impl FakePool {
             fail_tx_reads: AtomicBool::new(false),
             tx_state: Mutex::new(TxState::Unknown),
             confirmed_nonce: AtomicU64::new(0),
+            pending_nonce: AtomicU64::new(0),
             top_up_calls: AtomicU64::new(0),
         }
     }
@@ -97,8 +99,8 @@ impl FakePool {
         self.unconfirm_top_up.store(unconfirm, Ordering::SeqCst);
     }
 
-    /// Make every `transaction` and `confirmed_nonce` read fail (an RPC
-    /// outage).
+    /// Make every `transaction`, `confirmed_nonce` and `pending_nonce` read
+    /// fail (an RPC outage).
     pub fn fail_tx_reads(&self, fail: bool) {
         self.fail_tx_reads.store(fail, Ordering::SeqCst);
     }
@@ -111,6 +113,11 @@ impl FakePool {
     /// What `confirmed_nonce` reports. Starts at 0.
     pub fn set_confirmed_nonce(&self, nonce: u64) {
         self.confirmed_nonce.store(nonce, Ordering::SeqCst);
+    }
+
+    /// What `pending_nonce` reports. Starts at 0.
+    pub fn set_pending_nonce(&self, nonce: u64) {
+        self.pending_nonce.store(nonce, Ordering::SeqCst);
     }
 
     /// How many times `top_up` has been called, failed or not.
@@ -183,6 +190,13 @@ impl PoolChain for FakePool {
             "nonce read failed: error sending request for url ({FAKE_RPC_URL})"
         );
         Ok(self.confirmed_nonce.load(Ordering::SeqCst))
+    }
+    async fn pending_nonce(&self) -> anyhow::Result<u64> {
+        anyhow::ensure!(
+            !self.fail_tx_reads.load(Ordering::SeqCst),
+            "pending nonce read failed: error sending request for url ({FAKE_RPC_URL})"
+        );
+        Ok(self.pending_nonce.load(Ordering::SeqCst))
     }
 }
 

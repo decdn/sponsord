@@ -48,10 +48,15 @@ release.
 ### Fixed
 
 - **No second top-up while one may still mine.** A pool top-up whose receipt
-  could not be read now holds further top-ups until it mines, reverts, or
-  its nonce is used by another transaction, instead of being retried at the
-  next tick, which could refill the pool twice. See `docs/operator.md` §5
+  could not be read now holds further top-ups until it mines or can no
+  longer mine, instead of being retried at the next tick, which could refill
+  the pool twice. A dropped one is cleared with self-transfers from the
+  treasury, not a restart. See `docs/operator.md` §5
   ([#40](https://github.com/decdn/sponsord/issues/40)).
+- **Top-ups after a dropped or outside transaction.** The treasury's nonce
+  is read from the node for each transaction, so a dropped transaction or
+  one sent from the treasury elsewhere no longer stalls top-ups until a
+  restart.
 - **Keystore credential in the systemd unit.**
   `deploy/systemd/sponsord.service` copies the keystore credential to a `0600`
   file under `/run/sponsord` before start. Some systemd versions (254+ on
