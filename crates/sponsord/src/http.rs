@@ -11,7 +11,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use decdn_common::redact::sanitize_rpc_display;
+use decdn_common::redact::sanitize_err_chain;
 use sponsord_api::daemon::{Health, Info, IssueRequest, IssueResponse, routes};
 use sponsord_api::secret::Secret;
 use sponsord_api::time::{Clock, SystemClock};
@@ -143,12 +143,12 @@ async fn issue_inner(
         Err(SponsorError::Chain(e)) => {
             tracing::warn!(
                 "signer authorization read failed: {}",
-                sanitize_rpc_display(&e)
+                sanitize_err_chain(&e)
             );
             Err(ErrorCode::ChainUnavailable.into())
         }
         Err(SponsorError::Sign(e)) => {
-            tracing::error!("capability signing failed: {}", sanitize_rpc_display(&e));
+            tracing::error!("capability signing failed: {}", sanitize_err_chain(&e));
             Err(ErrorCode::Internal.into())
         }
     }

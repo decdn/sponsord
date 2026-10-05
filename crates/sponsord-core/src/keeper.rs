@@ -205,7 +205,7 @@ mod tests {
         let s = status.snapshot();
         assert_eq!((s.topups, s.failures), (0, 1));
 
-        // The warning keeps the cause but not the RPC URL (#38).
+        // The warning keeps the error text but not the RPC URL (#38).
         let text = log.text();
         assert!(text.contains("pool top-up failed"), "{text}");
         assert!(text.contains("error sending request"), "{text}");
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!((s.topups, s.failures, s.last_check_unix), (0, 1, 0));
         assert_eq!(pool.remaining_now(), MicroUsdc(0), "no top-up was sent");
 
-        // The warning keeps the cause but not the RPC URL (#38).
+        // The warning keeps the error text but not the RPC URL (#38).
         let text = log.text();
         assert!(text.contains("pool remaining read failed"), "{text}");
         assert!(text.contains("error sending request"), "{text}");

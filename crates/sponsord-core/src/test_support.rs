@@ -26,14 +26,15 @@ use crate::sponsor::Sponsor;
 pub const TEST_CHAIN_ID: u64 = 421_614;
 pub const TEST_PAYMENT_POOL: Address = Address::repeat_byte(0x22);
 pub const TEST_POOL_ID: B256 = B256::repeat_byte(0x11);
-/// The RPC URL a `FakePool` failure names, with an API key in its path, so
-/// tests can assert it never reaches a log line or error.
+/// The RPC URL `FakePool` failures name, with an API key in its path, so
+/// tests can assert it never reaches a log line.
 pub const FAKE_RPC_URL: &str = "http://rpc.example/v3/FAKE-RPC-KEY";
 
 /// In-memory pool: fixed owner, a mutable remaining balance, a settable
 /// per-signer registration map, and switches to fail reads or top-ups. A
-/// failure reads like reqwest's transport error, which names
-/// [`FAKE_RPC_URL`].
+/// failure reads like a raw reqwest transport error naming [`FAKE_RPC_URL`]:
+/// unlike `ChainPool`, it does not redact, so tests exercise the log sites'
+/// own redaction.
 pub struct FakePool {
     owner: Address,
     remaining: Mutex<MicroUsdc>,
