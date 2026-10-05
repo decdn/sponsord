@@ -110,14 +110,16 @@ impl FakePool {
         *self.tx_state.lock().unwrap() = state;
     }
 
-    /// What `confirmed_nonce` reports. Starts at 0.
-    pub fn set_confirmed_nonce(&self, nonce: u64) {
-        self.confirmed_nonce.store(nonce, Ordering::SeqCst);
+    /// What `confirmed_nonce` reports. Starts at 0. Named for the RPC's
+    /// transaction count: CodeQL takes a literal passed to a `*nonce*`
+    /// function for a hard-coded cryptographic nonce.
+    pub fn set_confirmed_tx_count(&self, count: u64) {
+        self.confirmed_nonce.store(count, Ordering::SeqCst);
     }
 
     /// What `pending_nonce` reports. Starts at 0.
-    pub fn set_pending_nonce(&self, nonce: u64) {
-        self.pending_nonce.store(nonce, Ordering::SeqCst);
+    pub fn set_pending_tx_count(&self, count: u64) {
+        self.pending_nonce.store(count, Ordering::SeqCst);
     }
 
     /// How many times `top_up` has been called, failed or not.

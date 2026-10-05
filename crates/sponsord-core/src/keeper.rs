@@ -421,8 +421,8 @@ mod tests {
     /// back unconfirmed at t=1000; later top-ups would succeed.
     async fn held_pool() -> (FakePool, KeeperStatus, Option<Unconfirmed>) {
         let pool = FakePool::new(Address::repeat_byte(1), 0);
-        pool.set_pending_nonce(10);
-        pool.set_confirmed_nonce(10);
+        pool.set_pending_tx_count(10);
+        pool.set_confirmed_tx_count(10);
         pool.unconfirm_top_ups(true);
         let status = KeeperStatus::default();
         let mut held = None;
@@ -515,13 +515,13 @@ mod tests {
 
         // Gone from the node, but nonce 11 is not used yet: it may come back.
         pool.set_tx_state(TxState::Unknown);
-        pool.set_confirmed_nonce(11);
+        pool.set_confirmed_tx_count(11);
         sweep(&pool, TEST_POOL_ID, &CFG, &status, &clock, &mut held).await;
         assert!(held.is_some());
 
         // Nonce 11 mined with another transaction: this one never can. The
         // sweep that learns it still sends nothing; the next one tops up.
-        pool.set_confirmed_nonce(12);
+        pool.set_confirmed_tx_count(12);
         sweep(&pool, TEST_POOL_ID, &CFG, &status, &clock, &mut held).await;
         assert!(held.is_none());
         assert_eq!(pool.top_up_calls(), 1);
@@ -549,12 +549,12 @@ mod tests {
             "{text}"
         );
 
-        pool.set_confirmed_nonce(max);
+        pool.set_confirmed_tx_count(max);
         sweep(&pool, TEST_POOL_ID, &CFG, &status, &clock, &mut held).await;
         assert!(held.is_some(), "nonce {max} may still be the top-up's");
         assert_eq!(pool.top_up_calls(), 1);
 
-        pool.set_confirmed_nonce(max + 1);
+        pool.set_confirmed_tx_count(max + 1);
         sweep(&pool, TEST_POOL_ID, &CFG, &status, &clock, &mut held).await;
         assert!(held.is_none());
         assert_eq!(status.snapshot().topup_unconfirmed_since_unix, 0);
@@ -609,7 +609,7 @@ mod tests {
             if !self.mined.swap(true, Ordering::SeqCst) {
                 self.inner.set_tx_state(TxState::Mined);
                 let n = self.inner.confirmed_nonce.load(Ordering::SeqCst);
-                self.inner.set_confirmed_nonce(n + 1);
+                self.inner.set_confirmed_tx_count(n + 1);
             }
         }
     }
