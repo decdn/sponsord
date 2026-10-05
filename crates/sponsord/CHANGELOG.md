@@ -54,3 +54,11 @@ release.
   ([#36](https://github.com/decdn/sponsord/issues/36)). If you installed a copy
   of the unit, take its new `RuntimeDirectory=`, `RuntimeDirectoryMode=`,
   `ExecStartPre=` and `SPONSORD_TREASURY_KEYSTORE` lines.
+
+### Security
+
+- **No RPC URL in logs or the exit error.** A failed chain call no longer
+  prints `SPONSORD_RPC_URL`, which often carries a provider API key, in the
+  exit error or the request log; the failure class (connection refused,
+  timeout, DNS, TLS) still shows
+  ([#38](https://github.com/decdn/sponsord/issues/38)).

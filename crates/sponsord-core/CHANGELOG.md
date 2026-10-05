@@ -39,7 +39,11 @@ release.
 ### Security
 
 - **No RPC URL in errors.** A malformed RPC URL is reported by length, not
-  echoed, since it often carries an API key.
+  echoed, since it often carries an API key. A failed chain call no longer
+  names it either: the URL reqwest puts in its errors is stripped from every
+  error `ChainPool` returns and from the keeper's warnings. Both now carry
+  the cause (connection refused, timeout, DNS, TLS)
+  ([#38](https://github.com/decdn/sponsord/issues/38)).
 
 ### Added
 

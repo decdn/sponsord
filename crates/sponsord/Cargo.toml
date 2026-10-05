@@ -25,6 +25,7 @@ clap.workspace = true
 sponsord-core.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+decdn-common.workspace = true
 decdn-incentive.workspace = true
 anyhow.workspace = true
 alloy.workspace = true

@@ -9,6 +9,7 @@ use alloy::primitives::{Address, B256, Signature, U256};
 use alloy::providers::{DynProvider, Provider, ProviderBuilder};
 use async_trait::async_trait;
 use decdn_client::buyer_pool::{ensure_allowance, top_up};
+use decdn_common::redact::strip_urls;
 use decdn_incentive::payment_pool::PaymentPool;
 use sponsord_api::MicroUsdc;
 
@@ -18,6 +19,25 @@ use sponsord_api::MicroUsdc;
 pub struct Authorization {
     pub spending_cap: MicroUsdc,
     pub expiry: u64,
+}
+
+/// Render a chain-call error and its causes as one line, without the RPC URL
+/// reqwest names in each of them (#38). The causes carry the failure class
+/// (connection refused, timeout, DNS, TLS) that the outer error's Display
+/// leaves out. Each is stripped on its own, so a removed URL cannot take the
+/// separator with it, and a cause that repeats the error before it (alloy's
+/// transport error forwards reqwest's message) is skipped.
+fn redacted(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut next = Some(err);
+    while let Some(e) = next {
+        let part = strip_urls(&e.to_string()).into_owned();
+        if parts.last() != Some(&part) {
+            parts.push(part);
+        }
+        next = e.source();
+    }
+    parts.join(": ")
 }
 
 /// The contract's unregistered state is a zero cap and zero expiry
@@ -77,8 +97,10 @@ impl ChainPool {
         S: TxSigner<Signature> + Send + Sync + 'static,
     {
         let owner = signer.address();
-        // The URL itself stays out of the error: RPC URLs often carry an API
-        // key in their path or query.
+        // The URL stays out of every error `ChainPool` returns: RPC URLs often
+        // carry an API key in their path or query. Here it is never formatted;
+        // transport errors, whose reqwest Display ends in ` for url (<url>)`,
+        // go through `redacted` (#38).
         let url = rpc_url.parse().map_err(|e| {
             anyhow::anyhow!(
                 "RPC URL ({} characters) is not a valid URL: {e}",
@@ -94,7 +116,7 @@ impl ChainPool {
             .usdc()
             .call()
             .await
-            .map_err(|e| anyhow::anyhow!("read PaymentPool.usdc(): {e}"))?;
+            .map_err(|e| anyhow::anyhow!("read PaymentPool.usdc(): {}", redacted(&e)))?;
         Ok(Self {
             contract,
             provider,
@@ -117,7 +139,7 @@ impl PoolChain for ChainPool {
             .getPool(pool_id)
             .call()
             .await
-            .map_err(|e| anyhow::anyhow!("getPool({pool_id}): {e}"))?;
+            .map_err(|e| anyhow::anyhow!("getPool({pool_id}): {}", redacted(&e)))?;
         Ok(MicroUsdc(pool.deposit.saturating_sub(pool.totalRedeemed)))
     }
 
@@ -130,8 +152,11 @@ impl PoolChain for ChainPool {
             self.payment_pool,
             Some(amount),
         )
-        .await?;
-        let topped = top_up(&self.contract, pool_id, amount).await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("approve the top-up: {}", redacted(e.as_ref())))?;
+        let topped = top_up(&self.contract, pool_id, amount)
+            .await
+            .map_err(|e| anyhow::anyhow!("top up {pool_id}: {}", redacted(e.as_ref())))?;
         Ok(MicroUsdc(
             u64::try_from(topped.credited).unwrap_or(u64::MAX),
         ))
@@ -143,7 +168,7 @@ impl PoolChain for ChainPool {
             .getPool(pool_id)
             .call()
             .await
-            .map_err(|e| anyhow::anyhow!("getPool({pool_id}): {e}"))?;
+            .map_err(|e| anyhow::anyhow!("getPool({pool_id}): {}", redacted(&e)))?;
         Ok(pool.owner)
     }
 
@@ -157,7 +182,9 @@ impl PoolChain for ChainPool {
             .getAuthorization(pool_id, signer)
             .call()
             .await
-            .map_err(|e| anyhow::anyhow!("getAuthorization({pool_id}, {signer}): {e}"))?;
+            .map_err(|e| {
+                anyhow::anyhow!("getAuthorization({pool_id}, {signer}): {}", redacted(&e))
+            })?;
         Ok(registration(a.cap, a.expiry))
     }
 }
@@ -182,6 +209,33 @@ mod tests {
         .to_string();
         assert!(!err.contains("SECRET-API-KEY"), "{err}");
         assert!(err.contains("not a valid URL"), "{err}");
+    }
+
+    /// reqwest names the URL in a transport error; the key in its path must
+    /// not survive into `ChainPool`'s error (#38).
+    #[tokio::test]
+    async fn an_unreachable_rpc_url_stays_out_of_the_error() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let err = ChainPool::connect(
+            &format!("http://127.0.0.1:{port}/v3/SECRET-API-KEY"),
+            Address::ZERO,
+            PrivateKeySigner::random(),
+        )
+        .await
+        .err()
+        .unwrap();
+        let err = format!("{err:#}");
+        assert!(err.contains("usdc()"), "{err}");
+        assert!(
+            err.contains("tcp connect error"),
+            "the cause is kept: {err}"
+        );
+        assert!(!err.contains("SECRET-API-KEY"), "{err}");
+        assert!(!err.contains(&format!(":{port}")), "{err}");
     }
 
     #[test]

@@ -5,10 +5,23 @@ use sponsord::http::{self, ApiState};
 use sponsord_core::Sponsor;
 use tokio_util::sync::CancellationToken;
 
+/// Print a fatal error through [`decdn_common::redact::sanitize_err_chain`]
+/// rather than returning it, which would let `anyhow`'s `Termination` impl
+/// print the raw chain: a chain-RPC failure's source error names the RPC URL,
+/// and API keys live in its path or query (#38).
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt::init();
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {}", decdn_common::redact::sanitize_err_chain(&e));
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
 
+async fn run() -> anyhow::Result<()> {
     let DaemonConfig {
         bind,
         api_token,
