@@ -150,7 +150,13 @@ async fn success_runs_bundle_pull_and_discards_state() {
         "--payment-pool-address {}",
         Address::repeat_byte(0x01)
     )));
+    assert!(calls.contains(&format!("--data-dir {}", data.join("decdn").display())));
+    assert!(calls.contains(&format!("--keystore {}", state_dir(&data).display())));
     assert!(!state_dir(&data).exists());
+    assert!(
+        data.join("decdn").is_dir(),
+        "the shared data dir outlives it"
+    );
 }
 
 #[tokio::test]
