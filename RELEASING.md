@@ -113,30 +113,30 @@ commit still releases binaries and images; it just cannot go to crates.io.
 
 ### The bump PR
 
-The [`bump-decdn`](.github/workflows/bump-decdn.yml) workflow opens the PR
-that moves the lock to decdn's latest release. decdn's `publish-crates.sh`
-starts it once crates.io serves that release, a schedule runs it every six
-hours, and *Run workflow* in the Actions tab starts it by hand. It waits up to
-20 minutes for crates.io to serve every versioned `decdn-*` crate, then
-pushes `bump/decdn-v<version>` and opens `build: pin decdn to v<version>`, with
-a changelog entry in every crate the move reaches
-([`bump_decdn.py`](.github/scripts/bump_decdn.py)). It does nothing when the
-lock is already at that release, or when a PR from that branch exists in any
-state: close one to skip a release. When `cargo metadata --locked` or
-`check-decdn-pin.sh` fails, it still opens the PR, says so in the body, and
-the run fails. A red CI on the PR means the new decdn needs code changes;
-push them to its branch.
+[`open-decdn-bump.sh`](.github/scripts/open-decdn-bump.sh) opens the PR that
+moves the lock to a decdn release. decdn's `publish-crates.sh` runs it with
+the tag it just published. Run it by hand from any sponsord checkout:
 
-The workflow opens the PR with a GitHub App token, because a PR that
-`GITHUB_TOKEN` opens starts no workflow. One-time setup:
+```bash
+.github/scripts/open-decdn-bump.sh            # decdn's latest release
+.github/scripts/open-decdn-bump.sh v0.1.2     # one release
+.github/scripts/open-decdn-bump.sh --dry-run  # show the change, push nothing
+```
 
-1. Create a GitHub App owned by the `decdn` organization, with no webhook and
-   these repository permissions: Contents read and write, Pull requests read
-   and write (Metadata read comes with them).
-2. Install it on `decdn/sponsord` only.
-3. In this repository's Actions settings, store the App's client ID as the
-   variable `DECDN_BUMP_APP_CLIENT_ID` and a generated private key as the
-   secret `DECDN_BUMP_APP_PRIVATE_KEY`.
+It works in a temporary worktree at `origin/main`, so your checkout and
+branch stay as they are. It waits up to 10 minutes for crates.io to serve
+every versioned `decdn-*` crate, then pushes `bump/decdn-v<version>` and opens
+`build: pin decdn to v<version>` with your `gh` login, with a changelog entry
+in every crate the move reaches ([`bump_decdn.py`](.github/scripts/bump_decdn.py)).
+The commit carries your git identity and skips the pre-commit hooks; CI checks
+the PR.
+
+It does nothing when `main` already pins that release or a newer one, or when
+a PR from that branch exists in any state: close one to skip a release. When
+`cargo metadata --locked` or `check-decdn-pin.sh` fails, it still opens the
+PR, says so in the body, and exits 1. Exit 3 means crates.io does not serve
+the release yet; run it again later. A red CI on the PR means the new decdn
+needs code changes; push them to its branch.
 
 ### Moving the lock by hand
 

@@ -1,7 +1,7 @@
 # Mirrors decdn's dependabot.yml. The decdn crates are public git
 # dependencies, so Dependabot resolves the workspace from this repository
-# alone. It does not move the decdn lock itself (`ignore` below): the
-# bump-decdn workflow opens that PR for each decdn release (RELEASING.md), and
+# alone. It does not move the decdn lock itself (`ignore` below):
+# open-decdn-bump.sh opens that PR for each decdn release (RELEASING.md), and
 # the `decdn-main` CI canary warns when the next one needs work.
 #
 # `chore` with scope gives `chore(deps): …` titles, which pass the `pr-title`

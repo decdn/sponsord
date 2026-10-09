@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Move the decdn pin to decdn's latest release, for the bump-decdn workflow.
+"""Move the decdn pin to a decdn release, for open-decdn-bump.sh.
 
 The decdn crates are git dependencies on github.com/decdn/decdn at a release
 `tag` (RELEASING.md § Pinning decdn). A bump PR changes three things: the
 `tag` and `version` on every decdn alias in the root Cargo.toml, the decdn
 packages in Cargo.lock (`cargo update`), and a changelog entry in every
-published crate the bump reaches. The workflow runs `cargo update`; this
-script does the rest, one subcommand per step:
+published crate the bump reaches. open-decdn-bump.sh runs `cargo update`
+and opens the PR; this script does the rest, one subcommand per step:
 
     latest            decdn's latest published release, and the pinned tag
+    pinned            the tag every decdn alias names (empty when they
+                      name a branch, a rev or different tags)
     ready <tag>       exit 0 when crates.io serves every versioned alias at
                       <tag>, 3 when it does not (yet)
     rewrite <tag>     point every decdn alias at <tag>
@@ -16,10 +18,7 @@ script does the rest, one subcommand per step:
                       commit Cargo.lock pins
     locked-sha        the decdn commit Cargo.lock pins
 
-`latest` prints `key=value` lines for $GITHUB_OUTPUT.
-
-The decdn ref is never an argument the workflow takes from a run input: it is
-always decdn's latest published release (ci.yml explains why).
+`latest` prints `key=value` lines for the calling script to read.
 
 Run: .github/scripts/bump-decdn.sh <subcommand> [args]
 """
@@ -292,6 +291,8 @@ def main(argv: list[str]) -> int:
         elif command == "changelog" and len(args) == 1:
             for path in changelog(repo_root, args[0]):
                 print(f"updated {path.relative_to(repo_root)}")
+        elif command == "pinned" and not args:
+            print(pinned_tag(repo_root) or "")
         elif command == "locked-sha" and not args:
             print(locked_sha(repo_root))
         else:

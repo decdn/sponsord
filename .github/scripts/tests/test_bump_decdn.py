@@ -1,6 +1,6 @@
 """Regression tests for the decdn bump script.
 
-The bump-decdn workflow opens its PR from what this script writes. A rewrite
+open-decdn-bump.sh opens its PR from what this script writes. A rewrite
 that misses an alias, or a changelog entry in the wrong crate, reaches review
 looking like a finished bump.
 """
@@ -197,6 +197,17 @@ def test_locked_sha_refuses_two_commits(tmp_path):
     lock.write_text(lock.read_text().replace(SHA, "0" * 40, 1))
     with pytest.raises(bd.BumpError, match="2 commits"):
         bd.locked_sha(repo)
+
+
+# ---- pinned --------------------------------------------------------------
+
+
+def test_pinned_names_the_shared_tag(tmp_path):
+    assert bd.pinned_tag(build(tmp_path)) == "v0.0.1"
+
+
+def test_pinned_is_none_off_a_tag(tmp_path):
+    assert bd.pinned_tag(build(tmp_path, ref='branch = "main"')) is None
 
 
 # ---- latest / ready ------------------------------------------------------
