@@ -12,6 +12,10 @@
 # Verified before it is unpacked:
 #   * the tag must still name the commit Cargo.lock pins, so a tag moved
 #     after the pin was reviewed is refused rather than followed;
+#   * the release must be immutable (GitHub refuses any change to its assets
+#     or its tag once published). KEYS is read at the locked commit, so a key
+#     revoked later still verifies here; immutability is what stops whoever
+#     holds such a key from re-uploading archives and SHA256SUMS they signed;
 #   * decdn's SHA256SUMS must carry a good signature, from a key in decdn's
 #     KEYS at that commit that is neither revoked nor expired;
 #   * each archive must have its own line in SHA256SUMS, and match it.
@@ -49,6 +53,11 @@ if [[ "$kind" == tag ]]; then
 fi
 [[ "$kind" == commit && "$sha" == "$LOCKED" ]] ||
   die "${REPO} tag ${TAG} names ${kind} ${sha}, not the commit Cargo.lock pins (${LOCKED})"
+
+immutable=$(gh api "repos/${REPO}/releases/tags/${TAG}" --jq '.immutable') ||
+  die "cannot read ${REPO} release ${TAG}"
+[[ "$immutable" == true ]] ||
+  die "${REPO} release ${TAG} is not immutable, so its signed assets could be replaced after the pin was reviewed"
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

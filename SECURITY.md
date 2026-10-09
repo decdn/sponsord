@@ -141,7 +141,7 @@ The `decdn-sponsored` image also carries the `decdn` binary the CLI spawns.
 That binary is not one of this release's archives: it is decdn's own release
 archive, at the decdn tag this release's `Cargo.toml` pins (the `tag` on its
 `decdn-*` dependencies), which must still name the commit its `Cargo.lock`
-locks. It is verified against decdn's signed `SHA256SUMS` before the image is
+locks and be an immutable GitHub release. It is verified against decdn's signed `SHA256SUMS` before the image is
 built
 ([`fetch-decdn.sh`](.github/scripts/fetch-decdn.sh)). Check it against decdn's
 release the same way:
