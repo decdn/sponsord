@@ -98,11 +98,40 @@ def test_archive_names_are_unique():
     assert len(names) == len(set(names))
 
 
-def test_tag_pattern_matches_release_tags_and_nothing_else():
+TAG_SAMPLES = [
+    "v0.1.0",
+    "v10.20.30",
+    "v1.0.0-rc.1",
+    "v1.0.0-beta-2",
+    "sponsord-v0.1.0",
+    "other-v0.1.0",
+    "v0-wip",
+    "v0.2.9.1",
+    "v1.0",
+    "v1.0.0-",
+    "v1.0.0 ",
+]
+
+
+def test_tag_pattern_accepts_exactly_what_parse_tag_does():
+    """A looser pattern would let a stray tag bound `git cliff --latest`."""
     pattern = re.compile(rp.tag_pattern())
-    assert pattern.match("v0.1.0")
-    assert not pattern.match("sponsord-v0.1.0")
-    assert not pattern.match("other-v0.1.0")
+    for tag in TAG_SAMPLES:
+        try:
+            rp.parse_tag(tag)
+            valid = True
+        except ValueError:
+            valid = False
+        assert bool(pattern.search(tag)) == valid, tag
+
+
+def test_tag_pattern_reads_the_same_as_an_ere():
+    """The same text is a bash ERE too; `(?:` would not be."""
+    tags = "\n".join(TAG_SAMPLES) + "\n"
+    out = subprocess.run(
+        ["grep", "-E", rp.tag_pattern()], input=tags, capture_output=True, text=True
+    ).stdout.splitlines()
+    assert out == [t for t in TAG_SAMPLES if rp.TAG.match(t)]
 
 
 def test_git_cliff_bounds_notes_at_the_same_tags():

@@ -65,10 +65,10 @@ split_commits = false
 # `chore(deps)!:` must not vanish with the routine bumps.
 protect_breaking_commits = true
 filter_commits = false
-# Release tags only: the workspace's `v<digit>…` tags
-# (.github/scripts/release_plan.py --tag-pattern), so a working tag never
-# bounds `--latest`.
-tag_pattern = "^v[0-9]"
+# Release tags only, exactly the ones release_plan.py accepts
+# (.github/scripts/release_plan.py --tag-pattern), so a working or stray tag
+# never bounds `--latest`.
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
 # Newest first within a group, matching how the hand-written crate
 # changelogs order entries.
 sort_commits = "newest"

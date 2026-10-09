@@ -73,7 +73,9 @@ CRATES: dict[str, dict] = {
     },
 }
 
-SEMVER = r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?"
+# Plain groups, no `(?:`: tag_pattern() hands the same text to git-cliff (Rust
+# regex) and to bash (ERE), and ERE has no non-capturing group.
+SEMVER = r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?"
 TAG = re.compile(rf"^v({SEMVER})$")
 
 
@@ -142,8 +144,14 @@ def images() -> list[str]:
 
 
 def tag_pattern() -> str:
-    """An ERE for every release tag, for git-cliff and the scripts' tag filters."""
-    return r"^v[0-9]"
+    """An ERE matching exactly the tags parse_tag() accepts, for git-cliff.
+
+    As strict as parse_tag(), not just a `v<digit>` prefix: a stray tag the
+    release workflow refuses (`v0-wip`) stays in the repository, and a looser
+    pattern would let `git cliff --latest` stop at it and drop commits from
+    the next release's notes.
+    """
+    return rf"^v{SEMVER}$"
 
 
 def main(argv: list[str]) -> int:
