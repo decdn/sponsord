@@ -75,6 +75,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       decdn_ref: ${{ steps.decdn.outputs.ref }}
       baseline: ${{ steps.baseline.outputs.tag }}
+      baseline_sha: ${{ steps.baseline.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -199,8 +200,12 @@ jobs:
                  "delete the stray tag or sign it before releasing."
             exit 1
           fi
-          echo "Baseline: $PREV."
+          # The commit, not just the name: verify checks out afresh, and a
+          # baseline tag re-pushed in between must not be built unverified.
+          PREV_SHA=$(git rev-parse "refs/tags/$PREV^{commit}")
+          echo "Baseline: $PREV ($PREV_SHA)."
           echo "tag=$PREV" >> "$GITHUB_OUTPUT"
+          echo "sha=$PREV_SHA" >> "$GITHUB_OUTPUT"
 
   # Runs alongside build; both need only `tag`. Nothing reaches the release or
   # a registry until this job passes: it creates the draft as its last step,
@@ -254,7 +259,8 @@ jobs:
       # publish-crates.sh runs the dry run at publish time.
 
       # Every published crate's public Rust API against the previous release
-      # (the baseline `tag` picked and verified), so a breaking change cannot
+      # (the commit of the baseline `tag` picked and verified, by SHA so the
+      # tag cannot move in between), so a breaking change cannot
       # ship under a non-breaking version. The tool reads the version on each
       # side from its manifest: a major bump, or a minor bump while the major
       # is 0, may break, and anything else may not. Default features, as decdn
@@ -267,10 +273,13 @@ jobs:
         shell: bash
         env:
           BASELINE: ${{ needs.tag.outputs.baseline }}
+          BASELINE_SHA: ${{ needs.tag.outputs.baseline_sha }}
         run: |
           set -euo pipefail
-          echo "Checking the workspace against $BASELINE."
-          cargo semver-checks --workspace --baseline-rev "$BASELINE" --default-features
+          [[ "$BASELINE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::no verified commit for baseline $BASELINE"; exit 1; }
+          echo "Checking the workspace against $BASELINE ($BASELINE_SHA)."
+          cargo semver-checks --workspace --baseline-rev "$BASELINE_SHA" --default-features
 
       # The conventional commits since the previous release tag.
       - name: Create draft GitHub Release
