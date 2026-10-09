@@ -271,20 +271,24 @@ async fn settle(
             );
             false
         }
+        // A used nonce settles it whatever the node says of the hash: a
+        // stale or load-balanced node can still report a replaced `topUp` as
+        // pending, or not yet have the receipt of one that mined. It is not
+        // counted as a top-up; the next sweep reads the balance either way.
+        Some((tx, TxState::Pending { .. } | TxState::Unknown)) if confirmed > nonce => {
+            tracing::warn!(
+                pool = %pool_id, %tx, nonce, confirmed,
+                "the RPC node has no receipt for pool top-up {tx}, but its nonce {nonce} \
+                 is used, so it has mined or never will; resuming top-ups"
+            );
+            false
+        }
         Some((tx, TxState::Pending { .. })) => {
             tracing::warn!(
                 pool = %pool_id, %tx, nonce, held_secs,
                 "pool top-up still pending; holding further top-ups"
             );
             true
-        }
-        Some((tx, TxState::Unknown)) if confirmed > nonce => {
-            tracing::warn!(
-                pool = %pool_id, %tx, nonce, confirmed,
-                "the RPC node does not know pool top-up {tx} and its nonce {nonce} is \
-                 used, so it can never mine; resuming top-ups"
-            );
-            false
         }
         Some((tx, TxState::Unknown)) => {
             tracing::error!(
@@ -536,6 +540,29 @@ mod tests {
         assert_eq!(pool.top_up_calls(), 1);
         let s = status.snapshot();
         assert_eq!((s.topups, s.topup_unconfirmed_since_unix), (0, 0));
+        sweep(&pool, TEST_POOL_ID, &CFG, &status, &clock, &mut held).await;
+        assert_eq!(pool.top_up_calls(), 2);
+    }
+
+    /// A stale or load-balanced node can keep reporting a replaced `topUp`
+    /// as pending. Its used nonce still clears the hold, or the documented
+    /// self-transfers could never clear it.
+    #[tokio::test]
+    async fn a_top_up_still_reported_pending_clears_once_its_nonce_is_used() {
+        let log = CapturedLog::default();
+        let _guard = log.install();
+        let (pool, status, mut held) = held_pool().await;
+        let clock = FixedClock::new(2_000);
+        pool.set_tx_state(TxState::Pending { nonce: 10 });
+        pool.set_confirmed_tx_count(11);
+        sweep(&pool, TEST_POOL_ID, &CFG, &status, &clock, &mut held).await;
+        assert!(held.is_none());
+        let s = status.snapshot();
+        assert_eq!((s.topups, s.topup_unconfirmed_since_unix), (0, 0));
+        assert_eq!(pool.top_up_calls(), 1);
+        let text = log.text();
+        assert!(text.contains("nonce 10 is used"), "{text}");
+
         sweep(&pool, TEST_POOL_ID, &CFG, &status, &clock, &mut held).await;
         assert_eq!(pool.top_up_calls(), 2);
     }
