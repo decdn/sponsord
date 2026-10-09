@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Signs and publishes a release draft staged by .github/workflows/release.yml.
 #
-# Each crate is released on its own, from a `<crate>-v<version>` tag, and
-# release_plan.py says what that crate's release carries: the archives and
-# SHA256SUMS (sponsord, sponsord-onramp, decdn-sponsored), a container image
-# with its SBOM and digest file (sponsord, sponsord-onramp), or nothing but the
-# notes (sponsord-core, where the signed tag is the attestation).
+# The workspace is released as a whole, from a `v<version>` tag, and
+# release_plan.py says what every release carries: the archives of sponsord,
+# sponsord-onramp and decdn-sponsored under one SHA256SUMS, and a container
+# image per server with its SBOM and digest file.
 #
 # The workflow builds all of that but signs nothing and publishes nothing — the
 # GitHub Release is left as a draft and the image manifest is pushed untagged.
@@ -13,7 +12,7 @@
 # it with their own GPG key, promotes the image tags, and publishes. There is no
 # signing key in Actions secrets.
 #
-# Usage:  .github/scripts/sign-release.sh decdn-sponsored-v0.1.2
+# Usage:  .github/scripts/sign-release.sh v0.1.2
 #
 # Environment:
 #   SPONSORD_REPO            override the owner/repo (default: decdn/sponsord)
@@ -34,30 +33,26 @@ set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 1; }
 
-TAG="${1:?tag required, e.g. decdn-sponsored-v0.1.2}"
+TAG="${1:?tag required, e.g. v0.1.2}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 command -v python3 >/dev/null || die "python3 not found on PATH"
 # The same plan release.yml staged the draft from; refuses a tag it does not
 # know rather than guessing what to sign.
 PLAN=$(python3 "$SCRIPT_DIR/release_plan.py" "$TAG") ||
-  die "$TAG is not a release tag (<crate>-vMAJOR.MINOR.PATCH[-pre])"
+  die "$TAG is not a release tag (vMAJOR.MINOR.PATCH[-pre])"
 plan_get() { sed -n "s/^$1=//p" <<<"$PLAN"; }
-CRATE=$(plan_get crate)
 VERSION=$(plan_get version)
 ARCHIVES=$(plan_get archives)
-IMAGE_NAME=$(plan_get image)
-# The CLI's stable releases are the ones users install, so they hold the
-# repository's "Latest release"; prereleases and the other crates' releases
-# never take it.
+# Stable releases hold the repository's "Latest release"; prereleases never do.
 LATEST=$(plan_get latest)
 
 REPO="${SPONSORD_REPO:-decdn/sponsord}"
 OWNER="${REPO%%/*}"
-# Zero or one image, named after the crate's binary. release.yml pushed it as
-# `ghcr.io/<owner>/<image>` and wrote that into the digest file
+# One image per server, named after its binary. release.yml pushed each as
+# `ghcr.io/<owner>/<image>` and wrote that into its digest file
 # (check-image-name.sh keeps the names in step).
-IMAGES=()
-[[ -n "$IMAGE_NAME" ]] && IMAGES=("$IMAGE_NAME")
+read -r -a IMAGES <<<"$(plan_get images)"
+(( ${#IMAGES[@]} > 0 )) || die "release_plan.py lists no images for $TAG"
 GHCR_NAMESPACE="ghcr.io/${OWNER}"
 # Derived from $REPO, exactly like the GHCR names. Hard-defaulting this to
 # `decdn` would mean a SPONSORD_REPO=<fork> rehearsal promotes GHCR tags on the
@@ -68,8 +63,7 @@ SIGNING_KEY="${SPONSORD_SIGNING_KEY:-}"
 
 # The files a signature covers. SHA256SUMS transitively covers every archive,
 # so the archives carry no individual .asc.
-SIGN_TARGETS=()
-(( ARCHIVES > 0 )) && SIGN_TARGETS+=("SHA256SUMS")
+SIGN_TARGETS=("SHA256SUMS")
 for name in "${IMAGES[@]}"; do
   SIGN_TARGETS+=("${name}-image-digest.txt" "${name}-${VERSION}-sbom.spdx.json")
 done
@@ -234,116 +228,108 @@ case "$IS_DRAFT" in
   *) die "unexpected isDraft value from gh: '$IS_DRAFT' (expected true or false)" ;;
 esac
 
-if (( ${#SIGN_TARGETS[@]} == 0 )); then
-  echo "==> $CRATE releases carry no assets; the signed tag is the attestation"
-else
-  # ---- download and check --------------------------------------------------
+# ---- download and check --------------------------------------------------
 
-  # Picked up by the EXIT trap installed above; kept on failure so the operator
-  # can inspect the bytes rather than re-download them.
-  WORKDIR=$(mktemp -d)
+# Picked up by the EXIT trap installed above; kept on failure so the operator
+# can inspect the bytes rather than re-download them.
+WORKDIR=$(mktemp -d)
 
-  echo "==> Downloading $TAG assets"
-  gh release download "$TAG" --repo "$REPO" --dir "$WORKDIR" ||
-    die "could not download the draft's assets; is the workflow still running?"
+echo "==> Downloading $TAG assets"
+gh release download "$TAG" --repo "$REPO" --dir "$WORKDIR" ||
+  die "could not download the draft's assets; is the workflow still running?"
 
-  cd "$WORKDIR"
+cd "$WORKDIR"
 
-  for f in "${SIGN_TARGETS[@]}"; do
-    [[ -f "$f" ]] || die "expected asset $f is missing from the draft"
-  done
+for f in "${SIGN_TARGETS[@]}"; do
+  [[ -f "$f" ]] || die "expected asset $f is missing from the draft"
+done
 
-  if (( ARCHIVES > 0 )); then
-    # --strict, because without it a malformed line is only a warning: a truncated
-    # or mangled entry would scroll past amid a wall of OK lines and that archive
-    # would ship covered by nothing.
-    echo "==> Checking SHA256SUMS against the downloaded archives"
-    sha256sum --strict --check SHA256SUMS || die \
-      "SHA256SUMS does not match the assets attached to the draft.
+# --strict, because without it a malformed line is only a warning: a truncated
+# or mangled entry would scroll past amid a wall of OK lines and that archive
+# would ship covered by nothing.
+echo "==> Checking SHA256SUMS against the downloaded archives"
+sha256sum --strict --check SHA256SUMS || die \
+  "SHA256SUMS does not match the assets attached to the draft.
 The release is corrupt or was tampered with. DO NOT re-run this script.
 Delete the draft and the tag and cut the release again (RELEASING.md § Recovery)."
 
-    # `sha256sum --check` only answers "does every file the manifest names hash
-    # correctly?" — never "does the manifest name every file being published?".
-    # Without this, a manifest covering 8 of 10 archives verifies clean and gets
-    # signed as if it were complete.
-    echo "==> Checking every published archive is covered by the manifest"
-    uncovered=()
-    for a in ./*.tar.gz ./*.zip; do
-      [[ -e "$a" ]] || continue
-      grep -qF -- "  ${a#./}" SHA256SUMS || uncovered+=("${a#./}")
-    done
-    (( ${#uncovered[@]} == 0 )) || die \
-      "these published archives are not covered by SHA256SUMS: ${uncovered[*]}
+# `sha256sum --check` only answers "does every file the manifest names hash
+# correctly?" — never "does the manifest name every file being published?".
+# Without this, a manifest covering 8 of 10 archives verifies clean and gets
+# signed as if it were complete.
+echo "==> Checking every published archive is covered by the manifest"
+uncovered=()
+for a in ./*.tar.gz ./*.zip; do
+  [[ -e "$a" ]] || continue
+  grep -qF -- "  ${a#./}" SHA256SUMS || uncovered+=("${a#./}")
+done
+(( ${#uncovered[@]} == 0 )) || die \
+  "these published archives are not covered by SHA256SUMS: ${uncovered[*]}
 Signing would vouch for a release whose manifest is incomplete.
 Re-run the upload-assets job, then retry."
 
-    # Neither check above notices a release that is merely SHORT: a manifest
-    # naming 1 of 2 archives, with only that one attached, verifies clean. The
-    # plan says how many this crate's release carries; hold both to it.
-    echo "==> Checking the release carries all $ARCHIVES archives"
-    shopt -s nullglob
-    attached=( ./*.tar.gz ./*.zip )
-    shopt -u nullglob
-    listed=$(grep -c '' SHA256SUMS)
-    (( ${#attached[@]} == ARCHIVES && listed == ARCHIVES )) || die \
-      "expected $ARCHIVES archives for $CRATE, but the draft carries ${#attached[@]}
+# Neither check above notices a release that is merely SHORT: a manifest
+# naming 9 of 10 archives, with only those attached, verifies clean. The
+# plan says how many a release carries; hold both to it.
+echo "==> Checking the release carries all $ARCHIVES archives"
+shopt -s nullglob
+attached=( ./*.tar.gz ./*.zip )
+shopt -u nullglob
+listed=$(grep -c '' SHA256SUMS)
+(( ${#attached[@]} == ARCHIVES && listed == ARCHIVES )) || die \
+  "expected $ARCHIVES archives, but the draft carries ${#attached[@]}
 and SHA256SUMS lists $listed. Signing would vouch for an incomplete release.
 Re-run the build and upload-assets jobs, then retry."
-  fi
 
-  # Anchored match, not a prefix glob: a prefix test passes on a multi-line file
-  # whose second line names a different registry, and on a truncated digest.
-  declare -A DIGESTS
-  for name in "${IMAGES[@]}"; do
-    image="${GHCR_NAMESPACE}/${name}"
-    file="${name}-image-digest.txt"
-    ref=$(tr -d '\r' < "$file" | head -n1)
-    # `grep -c ''`, not `wc -l`: wc counts newlines, so a two-line file with no
-    # trailing newline reports 1 and sails through — which is exactly the
-    # "second line names a different registry" case this guard exists to catch.
-    [[ $(grep -c '' "$file") -le 1 ]] ||
-      die "$file has more than one line"
-    [[ "$ref" =~ ^"${image}"@sha256:[0-9a-f]{64}$ ]] ||
-      die "$file is not a single $image digest reference: $ref"
-    DIGESTS[$name]="${ref#*@}"
-  done
+# Anchored match, not a prefix glob: a prefix test passes on a multi-line file
+# whose second line names a different registry, and on a truncated digest.
+declare -A DIGESTS
+for name in "${IMAGES[@]}"; do
+  image="${GHCR_NAMESPACE}/${name}"
+  file="${name}-image-digest.txt"
+  ref=$(tr -d '\r' < "$file" | head -n1)
+  # `grep -c ''`, not `wc -l`: wc counts newlines, so a two-line file with no
+  # trailing newline reports 1 and sails through — which is exactly the
+  # "second line names a different registry" case this guard exists to catch.
+  [[ $(grep -c '' "$file") -le 1 ]] ||
+    die "$file has more than one line"
+  [[ "$ref" =~ ^"${image}"@sha256:[0-9a-f]{64}$ ]] ||
+    die "$file is not a single $image digest reference: $ref"
+  DIGESTS[$name]="${ref#*@}"
+done
 
-  # ---- sign ----------------------------------------------------------------
+# ---- sign ----------------------------------------------------------------
 
-  echo "==> Signing"
-  for f in "${SIGN_TARGETS[@]}"; do
-    rm -f "${f}.asc"
-    gpg --batch --yes --armor --detach-sign --local-user "$FPR" "$f" ||
-      die "failed to sign $f (passphrase or gpg-agent problem?); nothing has been published"
-    # Verified against the KEYS-only keyring, so this confirms what a consumer
-    # will see rather than what this machine can already read.
-    gpg --homedir "$KEYS_HOME" --verify "${f}.asc" "$f" 2>/dev/null ||
-      die "signature on $f does not verify against KEYS"
-    echo "    signed $f"
-  done
+echo "==> Signing"
+for f in "${SIGN_TARGETS[@]}"; do
+  rm -f "${f}.asc"
+  gpg --batch --yes --armor --detach-sign --local-user "$FPR" "$f" ||
+    die "failed to sign $f (passphrase or gpg-agent problem?); nothing has been published"
+  # Verified against the KEYS-only keyring, so this confirms what a consumer
+  # will see rather than what this machine can already read.
+  gpg --homedir "$KEYS_HOME" --verify "${f}.asc" "$f" 2>/dev/null ||
+    die "signature on $f does not verify against KEYS"
+  echo "    signed $f"
+done
 
-  # ---- publish -------------------------------------------------------------
+# ---- publish -------------------------------------------------------------
 
-  # Only the signatures just produced. `gh release download` fetched every asset,
-  # so a bare ./*.asc glob would also re-upload any stray signature left on the
-  # draft by an earlier or abandoned run, unverified.
-  echo "==> Uploading signatures"
-  gh release upload "$TAG" --repo "$REPO" --clobber "${SIGN_TARGETS[@]/%/.asc}" ||
-    die "failed to upload signatures; the release is still a draft. Re-run this script."
+# Only the signatures just produced. `gh release download` fetched every asset,
+# so a bare ./*.asc glob would also re-upload any stray signature left on the
+# draft by an earlier or abandoned run, unverified.
+echo "==> Uploading signatures"
+gh release upload "$TAG" --repo "$REPO" --clobber "${SIGN_TARGETS[@]/%/.asc}" ||
+  die "failed to upload signatures; the release is still a draft. Re-run this script."
 
-  for stray in ./*.asc; do
-    [[ -e "$stray" ]] || continue
-    case " ${SIGN_TARGETS[*]/%/.asc} " in
-      *" ${stray#./} "*) ;;
-      *) echo "warning: draft carries an unrecognised signature: ${stray#./}" >&2 ;;
-    esac
-  done
-fi
+for stray in ./*.asc; do
+  [[ -e "$stray" ]] || continue
+  case " ${SIGN_TARGETS[*]/%/.asc} " in
+    *" ${stray#./} "*) ;;
+    *) echo "warning: draft carries an unrecognised signature: ${stray#./}" >&2 ;;
+  esac
+done
 
-if (( ${#IMAGES[@]} == 0 )); then
-  echo "==> $CRATE ships no container image"
-elif [[ -n "$SKIP_IMAGE_TAGS" ]]; then
+if [[ -n "$SKIP_IMAGE_TAGS" ]]; then
   echo "==> Skipping image tag promotion (SPONSORD_SKIP_IMAGE_TAGS set)"
   echo "    This release will ship with no pullable image tag."
 else
