@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -173,6 +174,43 @@ def test_changelog_is_idempotent(tmp_path):
     assert bd.add_entry(once, "v0.1.0", SHA) == once
 
 
+def test_changelog_replaces_an_unreleased_bump_to_an_older_tag():
+    # Two decdn releases before one sponsord release: only the last lock is true.
+    first = bd.add_entry(UNRELEASED, "v0.1.0", SHA)
+    second = bd.add_entry(first, "v0.1.1", "0" * 40)
+    assert "**decdn v0.1.0.**" not in second
+    assert second == bd.add_entry(UNRELEASED, "v0.1.1", "0" * 40)
+
+
+def test_changelog_keeps_other_changed_entries_when_replacing():
+    existing = UNRELEASED.replace(
+        "## [Unreleased]\n", "## [Unreleased]\n\n### Changed\n\n- Earlier change.\n"
+    )
+    second = bd.add_entry(bd.add_entry(existing, "v0.1.0", SHA), "v0.1.1", SHA)
+    assert second == bd.add_entry(existing, "v0.1.1", SHA)
+    assert "- Earlier change." in second
+
+
+def test_changelog_opens_changed_in_section_order():
+    # RELEASING.md § Changelogs: Changed (BREAKING), Added, Changed, Fixed, ...
+    existing = UNRELEASED.replace("## [Unreleased]\n", (
+        "## [Unreleased]\n\n### Changed (BREAKING)\n\n- Broke.\n\n"
+        "### Added\n\n- New.\n\n### Fixed\n\n- Bug.\n"
+    ))
+    unreleased = bd.add_entry(existing, "v0.1.0", SHA).split("## [0.0.1]")[0]
+    order = ["### Changed (BREAKING)", "### Added", "### Changed\n", "### Fixed"]
+    positions = [unreleased.index(h) for h in order]
+    assert positions == sorted(positions)
+    assert "\n\n\n" not in unreleased
+
+
+def test_changelog_opens_changed_at_the_end_of_unreleased():
+    existing = UNRELEASED.replace("## [Unreleased]\n", "## [Unreleased]\n\n### Added\n\n- New.\n")
+    unreleased = bd.add_entry(existing, "v0.1.0", SHA).split("## [0.0.1]")[0]
+    assert unreleased.index("### Added") < unreleased.index("### Changed")
+    assert unreleased.endswith("crates.io.\n\n")
+
+
 def test_changelog_without_unreleased_heading_fails(tmp_path):
     with pytest.raises(bd.BumpError, match="Unreleased"):
         bd.add_entry("# Changelog\n", "v0.1.0", SHA)
@@ -217,21 +255,9 @@ def release(tag: str, **extra) -> tuple[int, bytes]:
     return 200, json.dumps({"tag_name": tag, "draft": False, "prerelease": False, **extra}).encode()
 
 
-def test_latest_reports_up_to_date(tmp_path, monkeypatch):
-    stub_fetch(monkeypatch, {bd.RELEASES_API: release("v0.0.1")})
-    assert bd.latest(build(tmp_path)) == {"tag": "v0.0.1", "current": "v0.0.1",
-                                          "up_to_date": "true"}
-
-
-def test_latest_reports_a_newer_release(tmp_path, monkeypatch):
+def test_latest_names_the_release_tag(monkeypatch):
     stub_fetch(monkeypatch, {bd.RELEASES_API: release("v0.1.0")})
-    assert bd.latest(build(tmp_path))["up_to_date"] == "false"
-
-
-def test_latest_from_a_branch_pin_is_never_up_to_date(tmp_path, monkeypatch):
-    stub_fetch(monkeypatch, {bd.RELEASES_API: release("v0.0.1")})
-    out = bd.latest(build(tmp_path, ref='branch = "main"'))
-    assert out["current"] == "" and out["up_to_date"] == "false"
+    assert bd.latest() == "v0.1.0"
 
 
 @pytest.mark.parametrize("response", [
@@ -239,10 +265,10 @@ def test_latest_from_a_branch_pin_is_never_up_to_date(tmp_path, monkeypatch):
     release("nightly"),
     (404, b"{}"),
 ])
-def test_latest_refuses_anything_but_a_published_release(tmp_path, monkeypatch, response):
+def test_latest_refuses_anything_but_a_published_release(monkeypatch, response):
     stub_fetch(monkeypatch, {bd.RELEASES_API: response})
     with pytest.raises(bd.BumpError):
-        bd.latest(build(tmp_path))
+        bd.latest()
 
 
 def crate_url(name: str, version: str = "0.1.0") -> str:
@@ -256,9 +282,94 @@ def test_ready_when_crates_io_serves_every_versioned_alias(tmp_path, monkeypatch
     assert bd.ready(build(tmp_path), "v0.1.0") == []
 
 
-def test_not_ready_on_a_missing_or_unreachable_crate(tmp_path, monkeypatch):
+def test_not_ready_while_crates_io_has_no_such_version(tmp_path, monkeypatch):
     stub_fetch(monkeypatch, {crate_url("decdn-client"): (404, b""),
-                             crate_url("decdn-incentive"): OSError("timed out")})
-    missing = bd.ready(build(tmp_path), "v0.1.0")
-    assert missing == ["decdn-client 0.1.0 (HTTP 404)",
-                       "decdn-incentive 0.1.0 (unreachable: timed out)"]
+                             crate_url("decdn-incentive"): (200, b"")})
+    assert bd.ready(build(tmp_path), "v0.1.0") == ["decdn-client 0.1.0"]
+
+
+@pytest.mark.parametrize("response", [OSError("timed out"), (503, b""), (429, b"")])
+def test_ready_fails_when_crates_io_cannot_answer(tmp_path, monkeypatch, response):
+    # Index lag is a 404 and worth waiting out; anything else is not lag, and
+    # "run it again later" would hide it.
+    stub_fetch(monkeypatch, {crate_url("decdn-client"): response,
+                             crate_url("decdn-incentive"): (200, b"")})
+    with pytest.raises(bd.BumpError, match="decdn-client"):
+        bd.ready(build(tmp_path), "v0.1.0")
+
+
+# ---- compare -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("pinned", "tag", "relation"), [
+    ("v0.1.0", "v0.1.0", "same"),
+    ("v0.1.0", "v0.1.1", "behind"),
+    ("v0.1.1", "v0.1.0", "ahead"),
+    ("v0.9.0", "v0.10.0", "behind"),
+    ("v0.1.0-rc.1", "v0.1.0", "behind"),
+    ("v0.1.0", "v0.1.0-rc.1", "ahead"),
+    ("v0.1.0-rc.2", "v0.1.0-rc.10", "behind"),
+    ("v0.1.0-alpha", "v0.1.0-alpha.1", "behind"),
+    ("v0.1.0-rc.1", "v0.1.0-alpha", "ahead"),
+])
+def test_compare_orders_by_semver(tmp_path, pinned, tag, relation):
+    repo = build(tmp_path, ref=f'tag = "{pinned}"', version=pinned.removeprefix("v"))
+    assert bd.compare(repo, tag) == relation
+
+
+def test_compare_off_a_tag_is_untagged(tmp_path):
+    assert bd.compare(build(tmp_path, ref='branch = "main"'), "v0.1.0") == "untagged"
+
+
+# ---- command line --------------------------------------------------------
+# open-decdn-bump.sh branches on these exit codes and reads this output.
+
+
+@pytest.fixture
+def cli_repo(tmp_path, monkeypatch):
+    repo = build(tmp_path)
+    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    monkeypatch.chdir(repo)
+    return repo
+
+
+def test_main_ready_exits_0_when_served(cli_repo, monkeypatch, capsys):
+    stub_fetch(monkeypatch, {crate_url("decdn-client"): (200, b""),
+                             crate_url("decdn-incentive"): (200, b"")})
+    assert bd.main(["ready", "v0.1.0"]) == 0
+
+
+def test_main_ready_exits_3_while_not_served(cli_repo, monkeypatch, capsys):
+    stub_fetch(monkeypatch, {crate_url("decdn-client"): (404, b""),
+                             crate_url("decdn-incentive"): (200, b"")})
+    assert bd.main(["ready", "v0.1.0"]) == bd.NOT_READY == 3
+
+
+def test_main_ready_exits_1_when_crates_io_cannot_answer(cli_repo, monkeypatch, capsys):
+    stub_fetch(monkeypatch, {crate_url("decdn-client"): OSError("no route"),
+                             crate_url("decdn-incentive"): (200, b"")})
+    assert bd.main(["ready", "v0.1.0"]) == 1
+    assert "no route" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["ready", "main"], ["rewrite", "1.0.0"], ["compare", "x"]])
+def test_main_exits_1_on_a_bad_tag(cli_repo, capsys, argv):
+    assert bd.main(argv) == 1
+    assert "not a decdn release tag" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [[], ["bogus"], ["ready"], ["latest", "v0.1.0"]])
+def test_main_exits_2_on_usage(cli_repo, capsys, argv):
+    assert bd.main(argv) == 2
+
+
+def test_main_latest_prints_the_tag_alone(cli_repo, monkeypatch, capsys):
+    stub_fetch(monkeypatch, {bd.RELEASES_API: release("v0.1.0")})
+    assert bd.main(["latest"]) == 0
+    assert capsys.readouterr().out == "v0.1.0\n"
+
+
+@pytest.mark.parametrize(("tag", "out"), [("v0.0.1", "same"), ("v0.1.0", "behind")])
+def test_main_compare_prints_the_relation(cli_repo, capsys, tag, out):
+    assert bd.main(["compare", tag]) == 0
+    assert capsys.readouterr().out == f"{out}\n"

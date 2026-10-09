@@ -8,17 +8,19 @@ packages in Cargo.lock (`cargo update`), and a changelog entry in every
 published crate the bump reaches. open-decdn-bump.sh runs `cargo update`
 and opens the PR; this script does the rest, one subcommand per step:
 
-    latest            decdn's latest published release, and the pinned tag
+    latest            decdn's latest published release tag
     pinned            the tag every decdn alias names (empty when they
                       name a branch, a rev or different tags)
+    compare <tag>     where the pin stands against <tag>, by SemVer
+                      precedence: same, behind, ahead, or untagged when
+                      `pinned` is empty
     ready <tag>       exit 0 when crates.io serves every versioned alias at
-                      <tag>, 3 when it does not (yet)
+                      <tag>, 3 while it answers that one is missing (index
+                      lag), 1 when it cannot answer
     rewrite <tag>     point every decdn alias at <tag>
     changelog <tag>   add the bump entry under [Unreleased], naming the
                       commit Cargo.lock pins
     locked-sha        the decdn commit Cargo.lock pins
-
-`latest` prints `key=value` lines for the calling script to read.
 
 Run: .github/scripts/bump-decdn.sh <subcommand> [args]
 """
@@ -68,6 +70,7 @@ class BumpError(Exception):
 def fetch(url: str) -> tuple[int, bytes]:
     """(HTTP status, body) for a GET. Raises OSError on a transport failure."""
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    # Optional: only lifts api.github.com's anonymous rate limit.
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token and url.startswith("https://api.github.com/"):
         headers["Authorization"] = f"Bearer {token}"
@@ -100,8 +103,35 @@ def pinned_tag(repo_root: Path) -> str | None:
     return None
 
 
-def latest(repo_root: Path) -> dict[str, str]:
-    """decdn's latest published release and the pinned tag."""
+def compare(repo_root: Path, tag: str) -> str:
+    """Where the pin stands against <tag>: same, behind, ahead or untagged."""
+    target = semver_key(version_of(tag))
+    pinned = pinned_tag(repo_root)
+    try:
+        current = semver_key(version_of(pinned)) if pinned else None
+    except BumpError:
+        current = None
+    if current is None:
+        return "untagged"
+    if current == target:
+        return "same"
+    return "behind" if current < target else "ahead"
+
+
+def semver_key(version: str) -> tuple:
+    """A sort key in SemVer precedence: a release ranks above its prereleases."""
+    core, _, pre = version.partition("-")
+    numbers = tuple(int(n) for n in core.split("."))
+    if not pre:
+        return (numbers, (1,))
+    # Numeric identifiers compare as numbers and rank below alphanumeric ones;
+    # a shorter run of equal identifiers ranks lower.
+    ids = tuple((0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split("."))
+    return (numbers, (0, ids))
+
+
+def latest() -> str:
+    """decdn's latest published release tag."""
     status, body = fetch(RELEASES_API)
     if status != 200:
         raise BumpError(f"GET {RELEASES_API}: HTTP {status}")
@@ -112,12 +142,16 @@ def latest(repo_root: Path) -> dict[str, str]:
         raise BumpError(f"{RELEASES_API} returned a draft or prerelease")
     tag = str(release.get("tag_name", ""))
     version_of(tag)
-    current = pinned_tag(repo_root) or ""
-    return {"tag": tag, "current": current, "up_to_date": str(tag == current).lower()}
+    return tag
 
 
 def ready(repo_root: Path, tag: str) -> list[str]:
-    """The versioned aliases crates.io does not serve at <tag>; empty when ready."""
+    """The versioned aliases crates.io does not serve at <tag>; empty when ready.
+
+    Only a 404 counts as missing: that is index lag, which a wait outlasts.
+    Any other answer, or none, is a BumpError, so that a permanent failure is
+    not reported as "try again later".
+    """
     version = version_of(tag)
     aliases, _ = decdn_aliases(manifest(repo_root))
     if not aliases:
@@ -128,10 +162,11 @@ def ready(repo_root: Path, tag: str) -> list[str]:
         try:
             status, _ = fetch(url)
         except OSError as e:
-            missing.append(f"{name} {version} (unreachable: {e})")
-            continue
-        if status != 200:
-            missing.append(f"{name} {version} (HTTP {status})")
+            raise BumpError(f"{name} {version}: crates.io unreachable: {e}") from None
+        if status == 404:
+            missing.append(f"{name} {version}")
+        elif status != 200:
+            raise BumpError(f"{name} {version}: GET {url}: HTTP {status}")
     return missing
 
 
@@ -219,32 +254,61 @@ def entry(tag: str, sha: str) -> str:
     )
 
 
+ENTRY_PREFIX = "- **decdn v"
+
+# RELEASING.md § Changelogs: the sections after Changed, in their order.
+AFTER_CHANGED = ("### Fixed", "### Removed", "### Security")
+
+
 def add_entry(changelog: str, tag: str, sha: str) -> str:
-    """<changelog> with the bump entry first under [Unreleased] → ### Changed."""
-    if f"**decdn {tag}.**" in changelog:
-        return changelog
+    """<changelog> with the bump entry first under [Unreleased] → ### Changed.
+
+    An unreleased entry for an earlier bump is replaced, not kept: only the
+    last lock before a release is the one it ships.
+    """
     lines = changelog.splitlines()
     try:
         start = lines.index("## [Unreleased]")
     except ValueError:
         raise BumpError("no `## [Unreleased]` heading") from None
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-        len(lines),
-    )
-    bullet = entry(tag, sha).splitlines()
-    changed = next(
-        (i for i in range(start + 1, end) if lines[i] == "### Changed"),
+
+    def unreleased_end() -> int:
+        return next(
+            (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+            len(lines),
+        )
+
+    # Drop an earlier bump's bullet and its continuation lines, and the blank
+    # line after it when one precedes it too.
+    old = next(
+        (i for i in range(start + 1, unreleased_end()) if lines[i].startswith(ENTRY_PREFIX)),
         None,
     )
+    if old is not None:
+        stop = old + 1
+        while stop < len(lines) and lines[stop].startswith("  "):
+            stop += 1
+        if lines[old - 1] == "" and stop < len(lines) and lines[stop] == "":
+            stop += 1
+        del lines[old:stop]
+
+    end = unreleased_end()
+    bullet = entry(tag, sha).splitlines()
+    changed = next((i for i in range(start + 1, end) if lines[i] == "### Changed"), None)
     if changed is not None:
         insert_at, block = changed + 2, [*bullet, ""]
+        if insert_at > len(lines) or lines[insert_at - 1] != "":
+            raise BumpError(f"expected a blank line after line {insert_at - 1}")
     else:
-        insert_at, block = start + 2, ["### Changed", "", *bullet, ""]
-    if insert_at > len(lines) or lines[insert_at - 1] != "":
-        raise BumpError(f"expected a blank line after line {insert_at - 1}")
+        insert_at = next(
+            (i for i in range(start + 1, end) if lines[i] in AFTER_CHANGED),
+            end,
+        )
+        block = ["### Changed", "", *bullet, ""]
+        if lines[insert_at - 1] != "":
+            block.insert(0, "")
     lines[insert_at:insert_at] = block
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def changelog(repo_root: Path, tag: str) -> list[Path]:
@@ -275,8 +339,9 @@ def main(argv: list[str]) -> int:
     command, args = (argv[0], argv[1:]) if argv else ("", [])
     try:
         if command == "latest" and not args:
-            for key, value in latest(repo_root).items():
-                print(f"{key}={value}")
+            print(latest())
+        elif command == "compare" and len(args) == 1:
+            print(compare(repo_root, args[0]))
         elif command == "ready" and len(args) == 1:
             missing = ready(repo_root, args[0])
             if missing:
