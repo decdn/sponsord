@@ -37,8 +37,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      # A run started from another branch would otherwise bump that branch
+      # and open its commits against main.
       - uses: actions/checkout@v7
         with:
+          ref: main
           persist-credentials: false
 
       - name: Find decdn's latest release
@@ -49,6 +52,8 @@ jobs:
           set -euo pipefail
           .github/scripts/bump-decdn.sh latest | tee -a "$GITHUB_OUTPUT"
 
+      # Only a PR counts. A branch without one is left over from a run whose
+      # `gh pr create` failed, and "Open the PR" overwrites it.
       - name: Look for an existing bump
         id: existing
         if: steps.latest.outputs.up_to_date == 'false'
@@ -60,9 +65,8 @@ jobs:
           branch="bump/decdn-${TAG}"
           prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state all \
             --json number --jq 'length')
-          if [[ "$prs" != 0 ]] \
-            || git ls-remote --exit-code --heads "https://github.com/${GITHUB_REPOSITORY}" "$branch" >/dev/null; then
-            echo "::notice::a bump to ${TAG} already exists (branch ${branch}); nothing to do"
+          if [[ "$prs" != 0 ]]; then
+            echo "::notice::a PR for the bump to ${TAG} already exists (branch ${branch}); nothing to do"
             echo "found=true" >> "$GITHUB_OUTPUT"
           else
             echo "found=false" >> "$GITHUB_OUTPUT"
@@ -156,7 +160,10 @@ jobs:
           instead of ${OLD_TAG:-the previous pin} (${OLD_SHA}), and require ${TAG#v},
           which is on crates.io.
           EOF
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+          # Forced: the branch may be left over from a run that pushed it but
+          # opened no PR. "Look for an existing bump" stops before here when a
+          # PR exists.
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:refs/heads/${branch}"
 
           compare="https://github.com/decdn/decdn/compare/${OLD_SHA}...${NEW_SHA}"
