@@ -294,6 +294,19 @@ async fn decdn_sh_is_rendered() {
     let body = installer("/decdn.sh").await;
     assert_installer(&body);
     assert!(body.starts_with("#!/bin/sh"));
+    // Both pins are `v` tags now, so only the slot tells them apart.
+    let ab = "ab".repeat(32);
+    let cd = "cd".repeat(32);
+    for line in [
+        "DECDN_RELEASE=\"v0.1.0\"",
+        "DECDN_VERSION=\"0.1.0\"",
+        &format!("DECDN_SUMS_SHA256=\"{ab}\""),
+        "CLI_RELEASE=\"v0.2.0\"",
+        "CLI_VERSION=\"0.2.0\"",
+        &format!("CLI_SUMS_SHA256=\"{cd}\""),
+    ] {
+        assert!(body.lines().any(|l| l == line), "{line}");
+    }
 }
 
 #[tokio::test]
@@ -301,6 +314,19 @@ async fn decdn_ps1_is_rendered() {
     let body = installer("/decdn.ps1").await;
     assert_installer(&body);
     assert!(body.contains("-pc-windows-msvc"));
+    // Both pins are `v` tags now, so only the slot tells them apart.
+    let ab = "ab".repeat(32);
+    let cd = "cd".repeat(32);
+    for line in [
+        "$DecdnRelease = 'v0.1.0'",
+        "$DecdnVersion = '0.1.0'",
+        &format!("$DecdnSumsSha256 = '{ab}'"),
+        "$CliRelease = 'v0.2.0'",
+        "$CliVersion = '0.2.0'",
+        &format!("$CliSumsSha256 = '{cd}'"),
+    ] {
+        assert!(body.lines().any(|l| l.trim() == line), "{line}");
+    }
 }
 
 fn from_peer(mut req: Request<Body>, ip: &str) -> Request<Body> {

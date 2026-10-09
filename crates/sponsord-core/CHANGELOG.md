@@ -44,8 +44,9 @@ release.
 
 ### Added
 
-- **Published as its own crate.** Versioned and released independently of the
-  binaries, with crates.io metadata, dual-licensed MIT OR Apache-2.0.
+- **Published as its own crate.** Released with every sponsord crate under one
+  version (`vX.Y.Z`), with crates.io metadata, dual-licensed MIT OR
+  Apache-2.0.
 
 ### Fixed
 

@@ -43,8 +43,6 @@ PLAN=$(python3 "$SCRIPT_DIR/release_plan.py" "$TAG") ||
 plan_get() { sed -n "s/^$1=//p" <<<"$PLAN"; }
 VERSION=$(plan_get version)
 ARCHIVES=$(plan_get archives)
-# Stable releases hold the repository's "Latest release"; prereleases never do.
-LATEST=$(plan_get latest)
 
 REPO="${SPONSORD_REPO:-decdn/sponsord}"
 OWNER="${REPO%%/*}"
@@ -329,6 +327,13 @@ for stray in ./*.asc; do
   esac
 done
 
+# The repository's "Latest release", and the images' `:latest`: a stable
+# release with no higher stable release above it, so a maintenance release cut
+# under a newer one takes neither. Read from the tags fetched above, in the
+# repository (this script has moved into the download directory by now).
+LATEST=$(cd "$REPO_ROOT" && python3 "$SCRIPT_DIR/release_plan.py" "$TAG" --latest) ||
+  die "could not decide whether $TAG is the latest release"
+
 if [[ -n "$SKIP_IMAGE_TAGS" ]]; then
   echo "==> Skipping image tag promotion (SPONSORD_SKIP_IMAGE_TAGS set)"
   echo "    This release will ship with no pullable image tag."
@@ -341,14 +346,16 @@ else
     PROMOTE_TAGS=( "$VERSION" )
     echo "==> $VERSION is a prerelease: promoting :$VERSION only"
   else
-    PROMOTE_TAGS=( "latest" "$VERSION" "${VERSION%.*}" )
+    PROMOTE_TAGS=( "$VERSION" "${VERSION%.*}" )
+    # A maintenance release under a newer one keeps `latest` where it is.
+    [[ "$LATEST" == "true" ]] && PROMOTE_TAGS=( "latest" "${PROMOTE_TAGS[@]}" )
   fi
 
-  # Set once every GHCR tag is live, so a later failure can say so. By the time
-  # the Docker Hub leg runs, `ghcr.io/...:latest` ALREADY resolves to the new
-  # digests while the release is still a draft — an operator who hits a Docker
-  # Hub auth wall and stops for the day must be told that, not just "re-run".
-  GHCR_PROMOTED=""
+  # Every repository whose tags already point at this release, so a later
+  # failure can say which. With two images, a failure on the second leaves the
+  # first's `:latest` serving a release that is still a draft — an operator who
+  # stops for the day must be told that, not just "re-run".
+  PROMOTED=()
 
   # Points every tag in PROMOTE_TAGS of image $1 at the signed digest of $2.
   #
@@ -361,11 +368,11 @@ else
   promote_to() {
     local target="$1" name="$2" login_hint="$3" t got create_args=() already=""
     local source="${GHCR_NAMESPACE}/${name}@${DIGESTS[$name]}"
-    if [[ -n "$GHCR_PROMOTED" ]]; then
+    if (( ${#PROMOTED[@]} > 0 )); then
       already="
-The ${GHCR_NAMESPACE}/ tags are ALREADY promoted — :latest now serves an
-unpublished release. Either finish this script, or re-point those tags at the
-previous digests."
+These are ALREADY promoted, so their :latest serves an unpublished release:
+$(printf '  %s\n' "${PROMOTED[@]}")
+Either finish this script, or re-point those tags at the previous digests."
     fi
     for t in "${PROMOTE_TAGS[@]}"; do
       create_args+=( -t "${target}:${t}" )
@@ -382,6 +389,7 @@ Fix the problem and re-run this script — it is idempotent.${already}"
         die "${target}:${t} resolves to '${got}', not the signed digest ${DIGESTS[$name]}${already}"
       echo "    ${target}:${t} -> ${DIGESTS[$name]}"
     done
+    PROMOTED+=("$target")
   }
 
   # Tags the untagged manifests CI already pushed — no rebuild, no pull — so
@@ -390,7 +398,6 @@ Fix the problem and re-run this script — it is idempotent.${already}"
   for name in "${IMAGES[@]}"; do
     promote_to "${GHCR_NAMESPACE}/${name}" "$name" "ghcr.io"
   done
-  GHCR_PROMOTED=1
 
   if [[ -n "$SKIP_DOCKERHUB" ]]; then
     echo "==> Skipping the Docker Hub mirror (SPONSORD_SKIP_DOCKERHUB set)"

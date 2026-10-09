@@ -22,8 +22,8 @@
 #                             any key published in KEYS)
 #   CARGO_REGISTRY_TOKEN      crates.io token, if not in the cargo credentials file
 #   SPONSORD_ALLOW_RATE_LIMIT set to 1 to publish more than 5 brand-new crates
-#                             in one run — only once crates.io has raised this
-#                             repo's publish-new limit (see the check below)
+#                             in one run — only once crates.io has raised your
+#                             account's publish-new limit (see the check below)
 #
 # Unlike sign-release.sh this is NOT freely re-runnable: a crates.io version is
 # immutable and can never be replaced or re-uploaded (only yanked, which does
@@ -244,8 +244,12 @@ for entry in "${DEPS[@]}"; do
   read -r _ ver <<<"$entry"
   [[ -n "$DECDN_SHA" ]] || die "Cargo.lock at $TAG pins no decdn commit"
   DECDN_VERSION="$ver"
+  # The commit, not the tag object: ls-remote lists `refs/tags/vX` before its
+  # peeled `refs/tags/vX^{}`, and decdn's signed tags are annotated, so the
+  # first line would be the tag object. A lightweight tag has no `^{}` line.
   TAG_SHA=$(git ls-remote https://github.com/decdn/decdn \
-    "refs/tags/v${ver}^{}" "refs/tags/v${ver}" | awk 'NR==1 {print $1}') ||
+    "refs/tags/v${ver}^{}" "refs/tags/v${ver}" |
+    awk '$2 ~ /\^\{\}$/ {peeled = $1} {plain = $1} END {print (peeled != "" ? peeled : plain)}') ||
     die "cannot reach github.com/decdn/decdn to look up its v${ver} tag"
   [[ -n "$TAG_SHA" ]] || die \
     "decdn has no v${ver} tag, so ${ver} is not a decdn release.
@@ -331,6 +335,10 @@ echo "==> ${#CRATES[@]} crates at $VERSION"
 # in exactly the unrecoverable state described at the top of this file, with
 # some crates permanently uploaded and the version spent.
 #
+# The limit is per crates.io ACCOUNT, and this script cannot see what else the
+# account created lately: decdn's own first publish spends the same burst. So
+# within the burst it still asks, below, before any upload.
+#
 # Failing here is free; failing after the fifth upload is not.
 echo "==> Checking how many crates are new to crates.io"
 NEW_CRATES=()
@@ -356,14 +364,27 @@ $(printf '  %s\n' "${NEW_CRATES[@]}")
 A single run would be rate-limited (429) partway through, leaving some crates
 permanently published and the version spent. Do one of these first:
 
-  1. Ask the crates.io team to raise this repo's publish-new limit, then re-run.
+  1. Ask the crates.io team to raise your account's publish-new limit, then re-run.
   2. Publish the new crates by hand, in dependency order, spacing them out; the
      tagged release then only performs PublishUpdate, which is not constrained.
 
 Set SPONSORD_ALLOW_RATE_LIMIT=1 to override if the limit has already been raised."
 fi
-[[ ${#NEW_CRATES[@]} -eq 0 ]] ||
-  echo "    ${#NEW_CRATES[@]} new, ${#CRATES[@]} total (within the burst of $PUBLISH_NEW_BURST)"
+if (( ${#NEW_CRATES[@]} > 0 )); then
+  if (( ${#NEW_CRATES[@]} > PUBLISH_NEW_BURST )); then
+    echo "    ${#NEW_CRATES[@]} new, ${#CRATES[@]} total (over the burst of $PUBLISH_NEW_BURST; SPONSORD_ALLOW_RATE_LIMIT set)"
+  else
+    echo "    ${#NEW_CRATES[@]} new, ${#CRATES[@]} total (within the burst of $PUBLISH_NEW_BURST)"
+  fi
+  cat <<NOTE
+
+  The burst is per crates.io account, and this run spends ${#NEW_CRATES[@]} of it. If this
+  account created any crate in the last hour (decdn's first publish creates
+  several), wait about 10 minutes per crate created before going on, or the
+  run is rate-limited partway with some crates uploaded for good.
+
+NOTE
+fi
 
 echo "==> Dry run"
 # On a re-run after a successful publish this is where cargo stops, because the
@@ -373,11 +394,13 @@ echo "==> Dry run"
 cargo publish --workspace --locked --dry-run || die \
   "the dry run failed.
 
-If it reports the version already exists, THE PUBLISH ALREADY SUCCEEDED — this
-is a re-run, and nothing further is needed. Confirm before doing anything else:
+If it reports a version already exists, AN EARLIER RUN ALREADY UPLOADED SOME OR
+ALL OF THESE CRATES — this is a re-run. Do not assume all of them made it;
+check each before doing anything else:
 
-  https://crates.io/crates/${CRATES[0]%% *}/$VERSION
+$(printf '%s\n' "${CRATES[@]%% *}" | sed "s|^|  https://crates.io/crates/|; s|\$|/$VERSION|")
 
+and publish any that are missing as the failure message of that run says.
 Otherwise this is a genuine packaging failure and nothing has been uploaded."
 
 printf '\nAbout to publish %s crates to crates.io as version %s:\n\n' "${#CRATES[@]}" "$VERSION"
@@ -398,9 +421,11 @@ first already-published crate. Check which succeeded:
 $(printf '%s\n' "${CRATES[@]%% *}" | sed 's|^|  https://crates.io/crates/|')
 
 then publish only the remainder, in dependency order (sponsord-api, then
-sponsord-core, then the rest):
+sponsord-core, then the rest), from a fresh worktree at the tag — the one
+this script used is removed on exit, and your own checkout may differ:
 
-  cargo publish -p <crate> --locked"
+  git worktree add --detach ../sponsord-$TAG $TAG
+  cd ../sponsord-$TAG && cargo publish -p <crate> --locked"
 
 # ---- confirm ---------------------------------------------------------------
 

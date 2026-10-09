@@ -15,7 +15,7 @@ any of the following are especially welcome:
 - installer behaviour that runs or installs something other than the pinned,
   checksum-verified release binaries.
 
-Only the latest release of each crate receives fixes. The operator-facing
+Only the latest release receives fixes. The operator-facing
 security model (what each key can do, what bounds a loss) is in
 [docs/security.md](docs/security.md).
 
@@ -113,7 +113,7 @@ An image's version tags are the release's version (`v0.2.1` is
 `<version>` and `<major>.<minor>`, on either registry — is created only after
 that digest has been signed. Pulling by digest is still stronger: it pins the
 exact bytes you verified. A prerelease is published only as its exact version
-tag.
+tag, and a maintenance release below a newer one never moves `latest`.
 
 ### What a signature does and does not tell you
 
@@ -146,5 +146,5 @@ To tie a `.crate` back to the signed tag, read the commit out of the
 
 ```bash
 tar xzOf sponsord-<version>.crate sponsord-<version>/.cargo_vcs_info.json
-git rev-parse sponsord-v<version>^{commit}
+git rev-parse v<version>^{commit}
 ```

@@ -20,10 +20,9 @@ release.
 - **API under `/v1`.** `POST /v1/fund` (body `{"client", "proof"}`; was
   `turnstile_token`) and `GET /v1/capability`. `captcha_failed` is now
   `gate_failed`.
-- **The CLI pin names the CLI.** `ONRAMP_WRAPPER_RELEASE` /
-  `_SUMS_SHA256` are `ONRAMP_CLI_RELEASE` / `_SUMS_SHA256`. The tag is a
-  sponsord release, `vX.Y.Z`, as `ONRAMP_DECDN_RELEASE` is decdn's; any other
-  form is refused at startup. The installers take each version from the
+- **`ONRAMP_WRAPPER_RELEASE` is `ONRAMP_CLI_RELEASE`**, and
+  `ONRAMP_WRAPPER_SUMS_SHA256` is `ONRAMP_CLI_SUMS_SHA256`. The tag is a
+  sponsord release, `vX.Y.Z`, as `ONRAMP_DECDN_RELEASE` is decdn's. The installers take each version from the
   onramp, so archive names are unchanged.
 - **`ONRAMP_PUBLIC_URL` is required.** It no longer defaults to decdn's own
   onramp. URLs baked into the installers and the Turnstile sitekey are

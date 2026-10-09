@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Fails if the container images are named inconsistently.
 #
-# The image list lives in release_plan.py (which crate's release carries which
-# image). These must agree with it:
+# The image list lives in release_plan.py (which crate builds which image). These must agree with it:
 #   * Dockerfile                — one final target per image (`FROM base AS <image>`)
 #   * release.yml's docker job  — per image, pushes `ghcr.io/<owner>/<image>`
 #                                 and writes <image>-image-digest.txt

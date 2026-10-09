@@ -143,3 +143,41 @@ def test_cli_reads_the_tagged_tree():
     lines = [line for line in out if line]
     assert lines, "the workspace links decdn, so HEAD lists its crates"
     assert all(line.startswith("decdn-") and len(line.split()) == 2 for line in lines), lines
+
+
+def test_conflicting_decdn_versions_are_both_listed():
+    """publish-crates.sh refuses a mismatch only if it sees both versions."""
+    root = tomllib.loads(
+        "[workspace.dependencies]\n"
+        'decdn-client = { git = "https://github.com/decdn/decdn", version = "0.1.0" }\n'
+    )
+    members = {
+        "a": tomllib.loads('[package]\nname = "a"\n[dependencies]\ndecdn-client.workspace = true\n'),
+        "b": tomllib.loads(
+            '[package]\nname = "b"\n[dependencies]\n'
+            'decdn-client = { git = "https://github.com/decdn/decdn", version = "0.2.0" }\n'
+        ),
+    }
+    got, errors = rd.workspace_decdn_deps(root, members)
+    assert errors == []
+    assert got == [("decdn-client", "0.1.0"), ("decdn-client", "0.2.0")]
+
+
+def test_the_real_workspace_needs_one_decdn_version():
+    """What publish-crates.sh requires of the tagged tree, checked at every PR."""
+    root = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text())
+    members = {}
+    for rel in root["workspace"]["members"]:
+        m = tomllib.loads((REPO_ROOT / rel / "Cargo.toml").read_text())
+        members[m["package"]["name"]] = m
+    got, errors = rd.workspace_decdn_deps(root, members)
+    assert errors == []
+    assert {n for n, _ in got} == {"decdn-client", "decdn-common", "decdn-incentive"}
+    assert len({v for _, v in got}) == 1, got
+
+
+def test_cli_usage_error():
+    import subprocess
+
+    run = subprocess.run([sys.executable, str(MODULE_PATH)], capture_output=True, text=True)
+    assert run.returncode == 2 and "usage" in run.stderr

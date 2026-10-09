@@ -74,7 +74,10 @@ either breaks every installer already served.
    (and publish-new for the first release).
 
 6. **Repository protection.** Protect the release tags (`v*`) and the `main`
-   branch (a ruleset). Without tag protection, anyone with push access can
+   branch (a ruleset). `cargo release` pushes its release commit straight to
+   `main`, so whoever cuts a release must be able to bypass the `main`
+   ruleset's pull-request rule (an organization admin, today); otherwise the
+   push is refused after the tag is signed. Without tag protection, anyone with push access can
    create a release tag, and a `push`-triggered workflow runs the workflow
    definition *from the pushed ref*, so a tag can carry a `release.yml` with
    the signature gate deleted. The gate reads `KEYS` from `origin/main`
@@ -240,12 +243,14 @@ verifies the tag signature; then:
   that every published archive appears in it, **and** that the release carries
   exactly the 10 archives the plan lists, then signs `SHA256SUMS`;
 - **each image:** validates `<image>-image-digest.txt`, signs it and the SBOM,
-  promotes `:latest`, `:<version>` and `:<major>.<minor>` from the signed
-  digest on GHCR, and mirrors that digest to Docker Hub.
+  promotes `:<version>` and `:<major>.<minor>` from the signed digest on
+  GHCR, and `:latest` too unless a higher release exists, then mirrors that
+  digest to Docker Hub.
 
 Every signature is verified against a keyring built only from `KEYS` before
 the `.asc` files are uploaded. Last, it takes the release out of draft; a
-stable release becomes the repository's "Latest release".
+stable release with no higher stable release above it becomes the
+repository's "Latest release", so a maintenance release never takes it.
 
 The images' version tags are the release's version. The mirror is a
 manifest copy, not a rebuild (`docker buildx imagetools create`), so

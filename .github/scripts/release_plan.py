@@ -17,10 +17,13 @@ archive root) are a contract with every installer the onramp has served:
 Usage:
   release_plan.py <tag>              key=value lines for $GITHUB_OUTPUT
   release_plan.py <tag> --get KEY    one value (tag, version, archives, images,
-                                     images_json, prerelease, latest, matrix)
+                                     images_json, prerelease, matrix)
   release_plan.py <tag> --baseline   the tag cargo semver-checks compares
                                      against, from this repository's tags
                                      (nothing for the first release)
+  release_plan.py <tag> --latest     `true` if the tag should be the
+                                     repository's "Latest release", from
+                                     this repository's tags
   release_plan.py --images           every image name, one per line
   release_plan.py --tag-pattern      an ERE matching every release tag
 
@@ -104,8 +107,6 @@ def plan(tag: str) -> dict[str, str]:
         "images_json": json.dumps(images(), separators=(",", ":")),
         # GitHub's prerelease flag, set on the draft.
         "prerelease": "true" if prerelease else "false",
-        # The repository's "Latest release", never a prerelease.
-        "latest": "false" if prerelease else "true",
         # A GitHub Actions matrix: every archive of every binary crate.
         "matrix": json.dumps({"include": legs}, separators=(",", ":")),
     }
@@ -139,6 +140,20 @@ def baseline(tag: str, tags: Iterable[str]) -> str | None:
     return max(below)[1] if below else None
 
 
+def is_latest(tag: str, tags: Iterable[str]) -> bool:
+    """Whether `tag` should be the repository's "Latest release": stable, and
+    not below any other stable release tag. A maintenance release cut under a
+    newer release (supported, see baseline) never takes it."""
+    current = _precedence(parse_tag(tag))
+    if "-" in parse_tag(tag):
+        return False
+    for t in tags:
+        m = TAG.match(t)
+        if m and "-" not in m.group(1) and _precedence(m.group(1)) > current:
+            return False
+    return True
+
+
 def images() -> list[str]:
     return sorted(spec["image"] for spec in CRATES.values() if spec["image"])
 
@@ -161,11 +176,14 @@ def main(argv: list[str]) -> int:
     if argv == ["--tag-pattern"]:
         print(tag_pattern())
         return 0
-    if len(argv) == 2 and argv[1] == "--baseline":
+    if len(argv) == 2 and argv[1] in ("--baseline", "--latest"):
         tags = subprocess.run(
             ["git", "tag", "--list"], capture_output=True, text=True, check=True
         ).stdout.split()
         try:
+            if argv[1] == "--latest":
+                print("true" if is_latest(argv[0], tags) else "false")
+                return 0
             prev = baseline(argv[0], tags)
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)

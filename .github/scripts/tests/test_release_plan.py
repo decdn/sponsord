@@ -182,16 +182,32 @@ def test_cli_output_and_errors():
 
 
 @pytest.mark.parametrize(
-    ("tag", "prerelease", "latest"),
+    ("tag", "prerelease"),
+    [("v1.0.0", "false"), ("v1.0.0-rc.1", "true"), ("v0.2.0-alpha", "true")],
+)
+def test_prerelease_is_flagged(tag, prerelease):
+    assert rp.plan(tag)["prerelease"] == prerelease
+
+
+@pytest.mark.parametrize(
+    ("tag", "latest"),
     [
-        ("v1.0.0", "false", "true"),
-        ("v1.0.0-rc.1", "true", "false"),
-        ("v0.2.0-alpha", "true", "false"),
+        # The newest stable release, or a re-run of it.
+        ("v1.2.0", True),
+        ("v1.1.0", False),  # a re-run after 1.2.0 exists
+        # A maintenance release under a newer one never takes it.
+        ("v1.0.1", False),
+        ("v1.1.1", False),
+        ("v1.2.1", True),
+        # A prerelease never does, even above every stable release.
+        ("v1.3.0-rc.1", False),
+        # A candidate above the newest release does not hold it back.
+        ("v1.2.2", True),
     ],
 )
-def test_prerelease_is_flagged_and_never_latest(tag, prerelease, latest):
-    p = rp.plan(tag)
-    assert (p["prerelease"], p["latest"]) == (prerelease, latest)
+def test_latest_is_the_highest_stable_release(tag, latest):
+    tags = ["v1.0.0", "v1.1.0", "v1.2.0", "v1.3.0-rc.1", "v9.9.9.9", "sponsord-v9.0.0"]
+    assert rp.is_latest(tag, tags) is latest
 
 
 # The semver-checks baseline. Re-running a release's workflow is supported
@@ -268,6 +284,8 @@ def test_baseline_cli_reads_the_repository_tags(tmp_path):
         [sys.executable, str(MODULE_PATH), *a], capture_output=True, text=True, cwd=tmp_path
     )
     assert run("v0.2.0", "--baseline").stdout == "v0.1.0\n"
+    assert run("v0.3.0", "--latest").stdout == "true\n"
+    assert run("v0.2.1", "--latest").stdout == "false\n"
     none = run("v0.1.0", "--baseline")
     assert (none.returncode, none.stdout) == (0, "")
     assert run("sponsord-v0.2.0", "--baseline").returncode == 1
