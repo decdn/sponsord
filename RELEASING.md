@@ -205,12 +205,18 @@ Pushing a release tag starts
    signed by a key published there;
 3. checks the crate's version matches the tag, and runs `check-decdn-pin`;
 4. re-runs `cargo fmt`, clippy and the test suite on the whole workspace;
-5. creates the GitHub Release as a **draft**, with git-cliff notes for that
+5. runs `cargo semver-checks` on the crate's public API (default features)
+   against its newest earlier `<crate>-v` tag, and fails if the change needs a
+   bigger bump than the version says (in 0.x, a breaking change needs a minor
+   bump). A crate's first release has no baseline and skips it. To run it
+   before tagging, use
+   `cargo semver-checks -p <crate> --baseline-rev <crate>-vX.Y.Z --default-features`;
+6. creates the GitHub Release as a **draft**, with git-cliff notes for that
    crate and the locked decdn commit it was built against;
-6. builds the crate's archives and a `SHA256SUMS` manifest, asserting all of
+7. builds the crate's archives and a `SHA256SUMS` manifest, asserting all of
    them are present, and for `decdn-sponsored` appends the onramp pin values to
    the notes;
-7. for a server, assembles its multi-arch image from those archives — it does
+8. for a server, assembles its multi-arch image from those archives — it does
    not compile from source, so the image's binary is byte-identical to the
    archived one — and pushes the manifest **untagged**, attaching the SBOM and
    `<image>-image-digest.txt`.
