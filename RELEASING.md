@@ -111,6 +111,35 @@ must be the commit of decdn's `v<version>` tag, and that version must be on
 crates.io. `publish-crates.sh` checks both and refuses until then. Any other
 commit still releases binaries and images; it just cannot go to crates.io.
 
+### The bump PR
+
+The [`bump-decdn`](.github/workflows/bump-decdn.yml) workflow opens the PR
+that moves the lock to decdn's latest release. decdn's `publish-crates.sh`
+starts it once crates.io serves that release, a schedule runs it every six
+hours, and *Run workflow* in the Actions tab starts it by hand. It waits up to
+20 minutes for crates.io to serve every versioned `decdn-*` crate, then
+pushes `bump/decdn-v<version>` and opens `build: pin decdn to v<version>`, with
+a changelog entry in every crate the move reaches
+([`bump_decdn.py`](.github/scripts/bump_decdn.py)). It does nothing when the
+lock is already at that release, or when a PR from that branch exists in any
+state: close one to skip a release. When `cargo metadata --locked` or
+`check-decdn-pin.sh` fails, it still opens the PR, says so in the body, and
+the run fails. A red CI on the PR means the new decdn needs code changes;
+push them to its branch.
+
+The workflow opens the PR with a GitHub App token, because a PR that
+`GITHUB_TOKEN` opens starts no workflow. One-time setup:
+
+1. Create a GitHub App owned by the `decdn` organization, with no webhook and
+   these repository permissions: Contents read and write, Pull requests read
+   and write (Metadata read comes with them).
+2. Install it on `decdn/sponsord` only.
+3. In this repository's Actions settings, store the App's client ID as the
+   variable `DECDN_BUMP_APP_CLIENT_ID` and a generated private key as the
+   secret `DECDN_BUMP_APP_PRIVATE_KEY`.
+
+### Moving the lock by hand
+
 To move the lock to another decdn release, set `tag = "v<version>"` on every
 `decdn-*` entry in the root `Cargo.toml`, and `version = "<version>"` on each
 entry that has one, then:

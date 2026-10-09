@@ -119,7 +119,8 @@ rather than writing new ones.
   release `tag`. To move it, change the `tag` on every `decdn-*` alias (and
   the `version`, where one is set), then run
   `cargo update -p decdn-client -p decdn-common -p decdn-incentive -p decdn-e2e`
-  in a PR of its own (`RELEASING.md` § Pinning decdn). To build against a
+  in a PR of its own (`RELEASING.md` § Pinning decdn). The `bump-decdn`
+  workflow opens that PR for each decdn release. To build against a
   local `../decdn`, use an untracked
   `.cargo/config.toml` `[patch]` (see `CONTRIBUTING.md`), and do not commit
   the lockfile changes it causes.
