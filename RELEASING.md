@@ -209,7 +209,9 @@ job, which compiles nothing, gates everything else:
 4. picks the semver baseline, the highest release below the tag, and refuses
    it unless it too carries a signature from `KEYS`. "Below" is in semver
    order, so a re-run after a newer release, or a maintenance release, never
-   compares against a newer version. The first release has none.
+   compares against a newer version. The first release has none, and nor
+   does a `0.0.z` tag: Cargo treats every `0.0.z` bump as breaking, so the
+   check has nothing to find.
 
 Then two jobs run side by side:
 
