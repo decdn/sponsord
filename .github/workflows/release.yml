@@ -182,36 +182,24 @@ jobs:
       # reads the version on each side from its manifest: a major bump, or a
       # minor bump while the major is 0, may break, and anything else may not.
       # Default features, as decdn checks, so the `test-support` fakes are not
-      # held to semver. The baseline is the newest `<crate>-v` tag not on HEAD;
-      # a first release has none and skips the check. Its signature is checked
+      # held to semver. The baseline is the crate's highest release below this
+      # tag; a first release has none and skips the check. Its signature is checked
       # like this tag's, because building it runs its build scripts here.
       # Installed through install-action rather than a third-party action,
       # because this job holds `contents: write`.
       - name: cargo semver-checks against the previous release
         shell: bash
         env:
+          TAG: ${{ steps.plan.outputs.tag }}
           CRATE: ${{ steps.plan.outputs.crate }}
           # The keyring "Verify tag signature" built from KEYS on main.
           GNUPGHOME: ${{ runner.temp }}/keys-gnupg
         run: |
           set -euo pipefail
-          HEAD_SHA=$(git rev-parse HEAD)
-          PREV=""
-          # `versionsort.suffix=-` sorts `1.2.0-rc.1` below `1.2.0`, so a
-          # release after 1.2.0 checks against 1.2.0, not its release candidate.
-          for t in $(git -c versionsort.suffix=- tag --list "${CRATE}-v[0-9]*" --sort=-v:refname); do
-            # The glob also matches odd tags (`sponsord-v0-wip`); hold the
-            # baseline to the same shape release_plan.py accepts.
-            [[ "${t#"${CRATE}"-v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || continue
-            # Captured, not inlined: `-e` is off inside an `if` condition, so a
-            # failed rev-list there would silently pick this tag.
-            sha=$(git rev-list -n1 "$t") || {
-              echo "::error::cannot resolve tag $t"; exit 1; }
-            if [ "$sha" != "$HEAD_SHA" ]; then
-              PREV="$t"
-              break
-            fi
-          done
+          # The crate's highest release below this tag, in semver order, so a
+          # re-run after a newer release, or a maintenance release under one,
+          # never compares against a newer version (release_plan.py).
+          PREV=$(python3 .github/scripts/release_plan.py "$TAG" --baseline)
           if [ -z "$PREV" ]; then
             echo "No previous $CRATE release; skipping semver-checks."
             exit 0
