@@ -23,7 +23,7 @@ license = "MIT OR Apache-2.0"
 # Three parts, not two: this string, `rust-toolchain.toml`'s channel and every
 # `dtolnay/rust-toolchain@…` ref under .github/ are compared byte-for-byte by
 # check_toolchain_pin.py, so they move together.
-rust-version = "1.95.0"
+rust-version = "1.99.0"
 repository = "https://github.com/decdn/sponsord"
 homepage = "https://decdn.org"
 keywords = ["decdn", "cdn", "p2p", "sponsorship"]
