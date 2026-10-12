@@ -73,9 +73,15 @@ async fn serve(app: axum::Router) -> String {
     url
 }
 
+/// Windows PowerShell started from PowerShell 7 (the CI step's shell)
+/// inherits its `PSModulePath`, which hides 5.1's own modules
+/// (`Get-FileHash`, `Expand-Archive`); a fresh session starts without it.
+const INHERITED_MODULE_PATH: &str = "PSModulePath";
+
 fn powershell(command: &str) -> String {
     let out = std::process::Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", command])
+        .env_remove(INHERITED_MODULE_PATH)
         .output()
         .unwrap();
     assert!(
@@ -195,6 +201,7 @@ impl Fixture {
         );
         let mut child = tokio::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+            .env_remove(INHERITED_MODULE_PATH)
             .env("USERPROFILE", &home)
             .env("HOME", &home)
             .env("LOCALAPPDATA", &local)
