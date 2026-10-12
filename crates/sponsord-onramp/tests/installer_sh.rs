@@ -16,14 +16,34 @@ use std::fs;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::Stdio;
 use std::time::Duration;
 
 use sponsord_onramp::test_support::{
     FakeOptions, Fakes, STUB_DECDN, app_state_with_options, publish_release, test_config,
 };
+use tokio::io::{AsyncBufReadExt, BufReader};
 
-const HASH: &str = "9194000d7b356650e6924a7746ec4afb0b705838b65913c0e46cba6b15af69e5";
+macro_rules! hash {
+    () => {
+        "9194000d7b356650e6924a7746ec4afb0b705838b65913c0e46cba6b15af69e5"
+    };
+}
+const HASH: &str = hash!();
+const PULL: [&str; 2] = ["pull", concat!("b3:", hash!())];
+
+/// The address the stub `decdn` prints for the `n`th key it makes.
+fn stub_address(n: u64) -> String {
+    format!("0x{n:040x}")
+}
+
+/// One run of the script.
+struct Run {
+    ok: bool,
+    code: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
 
 struct Fixture {
     home: PathBuf,
@@ -86,33 +106,64 @@ impl Fixture {
         }
     }
 
-    async fn run_with(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+    /// Run the script with `args` and extra `env`. Plays the person in the
+    /// browser: whenever the script prints a gate link, the gate is passed
+    /// for that key, as opening the link would.
+    async fn run_with(&self, args: &[&str], env: &[(&str, &str)]) -> Run {
         let mut cmd = tokio::process::Command::new("sh");
         cmd.arg(&self.script)
             .args(args)
             .env("HOME", &self.home)
             .env("STUB_DIR", &self.stub)
             .env_remove("STUB_EXIT")
-            .stdin(std::process::Stdio::null());
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         for (k, v) in env {
             cmd.env(k, v);
         }
-        tokio::time::timeout(Duration::from_secs(60), cmd.output())
+        let mut child = cmd.spawn().unwrap();
+
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let onramp = self.onramp.clone();
+        let reader = tokio::spawn(async move {
+            let mut stdout = String::new();
+            while let Some(line) = lines.next_line().await.unwrap() {
+                if let Some((_, client)) = line.split_once("/fund?client=") {
+                    let resp = reqwest::Client::new()
+                        .post(format!("{onramp}/v1/fund"))
+                        .json(&serde_json::json!({ "client": client.trim(), "proof": "ok" }))
+                        .send()
+                        .await
+                        .unwrap();
+                    assert!(resp.status().is_success(), "{}", resp.status());
+                }
+                stdout.push_str(&line);
+                stdout.push('\n');
+            }
+            stdout
+        });
+        let out = tokio::time::timeout(Duration::from_secs(60), child.wait_with_output())
             .await
             .expect("decdn.sh finishes")
-            .unwrap()
+            .unwrap();
+        Run {
+            ok: out.status.success(),
+            code: out.status.code(),
+            stdout: reader.await.unwrap(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        }
     }
 
     /// Run the script, and fail the test unless it succeeds. Returns stdout.
     async fn run_ok(&self, args: &[&str], env: &[(&str, &str)]) -> String {
-        let out = self.run_with(args, env).await;
-        let stdout = String::from_utf8(out.stdout).unwrap();
+        let run = self.run_with(args, env).await;
         assert!(
-            out.status.success(),
-            "decdn.sh failed\nstdout:\n{stdout}\nstderr:\n{}",
-            String::from_utf8_lossy(&out.stderr)
+            run.ok,
+            "decdn.sh failed\nstdout:\n{}\nstderr:\n{}",
+            run.stdout, run.stderr
         );
-        stdout
+        run.stdout
     }
 
     fn bin(&self, name: &str) -> PathBuf {
@@ -143,34 +194,9 @@ impl Fixture {
         fs::read_to_string(self.stub.join("keys")).map_or(0, |s| s.trim().parse().unwrap())
     }
 
-    /// Play the person in the browser: once the script has written a key
-    /// address other than `previous`, pass the gate for it.
-    fn pass_gate(&self, previous: Option<String>) -> tokio::task::JoinHandle<String> {
-        let address_file = self.state().join("address");
-        let onramp = self.onramp.clone();
-        tokio::spawn(async move {
-            let address = loop {
-                if let Ok(a) = fs::read_to_string(&address_file)
-                    && Some(&a) != previous.as_ref()
-                {
-                    break a;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            };
-            let resp = reqwest::Client::new()
-                .post(format!("{onramp}/v1/fund"))
-                .json(&serde_json::json!({ "client": address, "proof": "ok" }))
-                .send()
-                .await
-                .unwrap();
-            assert!(resp.status().is_success(), "{}", resp.status());
-            address
-        })
+    fn gate_link(&self, n: u64) -> String {
+        format!("{}/fund?client={}", self.onramp, stub_address(n))
     }
-}
-
-fn pull_args() -> Vec<String> {
-    vec!["pull".into(), format!("b3:{HASH}")]
 }
 
 #[tokio::test]
@@ -219,26 +245,14 @@ async fn a_changed_pin_reinstalls() {
 #[tokio::test]
 async fn pull_passes_the_gate_and_runs_decdn_with_the_capability() {
     let fx = Fixture::new("pull").await;
-    let gate = fx.pass_gate(None);
-    let mut args = pull_args();
-    args.extend([
-        "-o".into(),
-        "out dir".into(),
-        "--namespace".into(),
-        "1".into(),
-    ]);
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let args = [PULL[0], PULL[1], "-o", "out dir", "--namespace", "1"];
     let stdout = fx.run_ok(&args, &[]).await;
-    let address = gate.await.unwrap();
 
     assert!(
         stdout.contains("Open this link to start the download:"),
         "{stdout}"
     );
-    assert!(
-        stdout.contains(&format!("{}/fund?client={address}", fx.onramp)),
-        "{stdout}"
-    );
+    assert!(stdout.contains(&fx.gate_link(1)), "{stdout}");
     let pool = alloy_primitives::Address::repeat_byte(0x22);
     let bond = alloy_primitives::Address::repeat_byte(0x33);
     let state = fx.state();
@@ -268,17 +282,14 @@ async fn pull_passes_the_gate_and_runs_decdn_with_the_capability() {
 #[tokio::test]
 async fn a_failed_pull_resumes_with_the_same_key_and_capability() {
     let fx = Fixture::new("resume").await;
-    let args = pull_args();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let gate = fx.pass_gate(None);
-    let out = fx.run_with(&args, &[("STUB_EXIT", "3")]).await;
-    gate.await.unwrap();
-    assert_eq!(out.status.code(), Some(3));
+    let run = fx.run_with(&PULL, &[("STUB_EXIT", "3")]).await;
+    assert_eq!(run.code, Some(3));
+    assert!(run.stdout.contains(&fx.gate_link(1)), "{}", run.stdout);
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("Re-run the same command to resume"),
+        run.stderr.contains("Re-run the same command to resume"),
         "{}",
-        String::from_utf8_lossy(&out.stderr)
+        run.stderr
     );
     let state = fx.state();
     assert_eq!(
@@ -299,7 +310,7 @@ async fn a_failed_pull_resumes_with_the_same_key_and_capability() {
     assert_eq!(mode(&state.join("password")), 0o600);
 
     // No gate this time: the saved key and capability are reused.
-    let stdout = fx.run_ok(&args, &[]).await;
+    let stdout = fx.run_ok(&PULL, &[]).await;
     assert!(!stdout.contains("Open this link"), "{stdout}");
     assert_eq!(fx.keys_made(), 1);
     assert_eq!(fx.fakes.source.issued_count(), 1);
@@ -316,18 +327,13 @@ async fn a_failed_pull_resumes_with_the_same_key_and_capability() {
 #[tokio::test]
 async fn a_capability_near_expiry_is_replaced_with_a_new_key() {
     let fx = Fixture::new("expiry").await;
-    let args = pull_args();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let gate = fx.pass_gate(None);
-    fx.run_with(&args, &[("STUB_EXIT", "1")]).await;
-    let first = gate.await.unwrap();
+    let run = fx.run_with(&PULL, &[("STUB_EXIT", "1")]).await;
+    assert!(run.stdout.contains(&fx.gate_link(1)), "{}", run.stdout);
     fs::write(fx.state().join("expiry"), "1").unwrap();
 
-    let gate = fx.pass_gate(Some(first.clone()));
-    fx.run_ok(&args, &[]).await;
-    let second = gate.await.unwrap();
-    assert_ne!(first, second);
+    let stdout = fx.run_ok(&PULL, &[]).await;
+    assert!(stdout.contains(&fx.gate_link(2)), "{stdout}");
     assert_eq!(fx.keys_made(), 2);
     assert!(fx.calls()[1].contains("--capability dcap1:FAKE2 "));
 }
@@ -335,19 +341,13 @@ async fn a_capability_near_expiry_is_replaced_with_a_new_key() {
 #[tokio::test]
 async fn a_download_already_running_is_not_started_twice() {
     let fx = Fixture::new("locked").await;
-    let args = pull_args();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let lock = fx.sponsored().join(format!("downloads/{HASH}.lock"));
     fs::create_dir_all(&lock).unwrap();
     fs::write(lock.join("pid"), std::process::id().to_string()).unwrap();
 
-    let out = fx.run_with(&args, &[]).await;
-    assert!(!out.status.success());
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("already running"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let run = fx.run_with(&PULL, &[]).await;
+    assert!(!run.ok);
+    assert!(run.stderr.contains("already running"), "{}", run.stderr);
     assert_eq!(fx.keys_made(), 0);
     assert!(lock.exists(), "another run's lock is left alone");
 
@@ -356,28 +356,22 @@ async fn a_download_already_running_is_not_started_twice() {
     let dead_pid = dead.id();
     dead.wait().unwrap();
     fs::write(lock.join("pid"), dead_pid.to_string()).unwrap();
-    let gate = fx.pass_gate(None);
-    fx.run_ok(&args, &[]).await;
-    gate.await.unwrap();
+    fx.run_ok(&PULL, &[]).await;
     assert!(!lock.exists());
 }
 
 #[tokio::test]
 async fn a_busy_shared_data_dir_runs_the_download_in_its_own() {
     let fx = Fixture::new("busy_data_dir").await;
-    let args = pull_args();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let lock = fx.sponsored().join("decdn.lock");
     fs::create_dir_all(&lock).unwrap();
     fs::write(lock.join("pid"), std::process::id().to_string()).unwrap();
 
-    let gate = fx.pass_gate(None);
-    let out = fx.run_with(&args, &[("STUB_EXIT", "1")]).await;
-    gate.await.unwrap();
+    let run = fx.run_with(&PULL, &[("STUB_EXIT", "1")]).await;
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("without the shared peer cache"),
+        run.stderr.contains("without the shared peer cache"),
         "{}",
-        String::from_utf8_lossy(&out.stderr)
+        run.stderr
     );
     assert!(fx.calls()[0].contains(&format!("--data-dir {} ", fx.state().display())));
 }
@@ -393,8 +387,8 @@ async fn bad_arguments_are_refused_before_installing() {
         &["pull", HASH, "--namespace", "x1"],
         &["pull", HASH, "--bogus"],
     ] {
-        let out = fx.run_with(args, &[]).await;
-        assert!(!out.status.success(), "{args:?}");
+        let run = fx.run_with(args, &[]).await;
+        assert!(!run.ok, "{args:?}");
     }
     assert!(!fx.bin("decdn").exists());
 }

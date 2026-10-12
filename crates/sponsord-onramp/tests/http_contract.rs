@@ -16,7 +16,6 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
-use sponsord_api::onramp::Profile;
 use sponsord_api::time::{Clock, FixedClock, SystemClock};
 use sponsord_api::{ErrorBody, ErrorCode, IssuedCapability, MicroUsdc};
 use sponsord_onramp::net::ClientIpSource;
@@ -233,28 +232,10 @@ async fn fund_asks_the_daemon_for_the_configured_terms() {
 }
 
 #[tokio::test]
-async fn profile_carries_the_daemon_chain_and_the_configured_contracts() {
-    let mut config = test_config();
-    config.slash_judge = Some(Address::repeat_byte(0x44));
-    let (state, _) = app_state_with_options(FakeOptions {
-        config,
-        ..FakeOptions::default()
-    })
-    .await;
-    let app = sponsord_onramp::http::router(state);
-    let (s, v) = send_json(&app, get("/v1/profile")).await;
-    assert_eq!(s, StatusCode::OK);
-    let profile: Profile = serde_json::from_value(v).unwrap();
-    assert_eq!(
-        profile,
-        Profile {
-            chain_id: 421_614,
-            rpc_url: "https://rpc.example".into(),
-            payment_pool: Address::repeat_byte(0x22),
-            capacity_bond: Address::repeat_byte(0x33),
-            slash_judge: Some(Address::repeat_byte(0x44)),
-        }
-    );
+async fn the_profile_is_not_served_separately() {
+    let app = sponsord_onramp::http::router(app_state_with_fakes().await);
+    let (s, _) = send(&app, get("/v1/profile")).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
 }
 
 async fn installer(path: &str, config: sponsord_onramp::config::OnrampConfig) -> String {

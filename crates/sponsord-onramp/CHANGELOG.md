@@ -27,13 +27,13 @@ release.
   the installers no longer write `~/.decdn/sponsor.toml`, and on Windows the
   one-line form is
   `& ([scriptblock]::Create((irm <onramp>/decdn.ps1))) pull b3:<hash>`.
-  Commands of the form `curl … | sh -s -- pull b3:<hash>` keep working, and
-  `decdn-sponsored` binaries already installed keep working against this
-  onramp.
-- **The download profile is baked into the installers.** The chain id, RPC
-  URL, `PaymentPool`, `CapacityBond` and `SlashJudge` are rendered into the
-  scripts at startup, beside the onramp URL and the `decdn` pin.
-  `GET /v1/profile` still serves them.
+  Commands of the form `curl … | sh -s -- pull b3:<hash>` keep working.
+- **The download profile is baked into the installers, and
+  `GET /v1/profile` is removed.** The chain id, RPC URL, `PaymentPool`,
+  `CapacityBond` and `SlashJudge` are rendered into the scripts at startup,
+  beside the onramp URL and the `decdn` pin. `decdn-sponsored` binaries
+  already installed read `/v1/profile` on every run, so they stop working
+  against this onramp; re-running the installer command replaces them.
 - **`ONRAMP_CLI_RELEASE`, `ONRAMP_CLI_SUMS_SHA256` and
   `ONRAMP_MIN_CLI_VERSION` are removed.** The onramp ignores them; delete
   them from your configuration.

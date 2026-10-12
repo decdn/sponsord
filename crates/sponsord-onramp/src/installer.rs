@@ -4,12 +4,29 @@
 //! release and the download profile are baked in, so the user sets nothing
 //! themselves.
 
-use sponsord_api::onramp::Profile;
+use alloy_primitives::Address;
 
 use crate::config::OnrampConfig;
 
 const DECDN_SH_TEMPLATE: &str = include_str!("../assets/decdn.sh");
 const DECDN_PS1_TEMPLATE: &str = include_str!("../assets/decdn.ps1");
+
+/// The chain and contracts a download runs `decdn` against, baked into the
+/// installers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Profile {
+    /// EIP-155 id of the chain the contracts are on, from the daemon.
+    pub chain_id: u64,
+    /// JSON-RPC endpoint `decdn` reads the chain through.
+    pub rpc_url: String,
+    /// The `PaymentPool` the capabilities are signed against, from the
+    /// daemon.
+    pub payment_pool: Address,
+    /// The `CapacityBond`, for node discovery.
+    pub capacity_bond: Address,
+    /// The `SlashJudge`, when the onramp names one.
+    pub slash_judge: Option<Address>,
+}
 
 /// Both installers, rendered.
 #[derive(Clone, Debug)]

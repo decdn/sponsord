@@ -4,14 +4,13 @@
 use std::sync::Arc;
 
 use sponsord_api::MicroUsdc;
-use sponsord_api::onramp::Profile;
 use sponsord_api::time::{Clock, SystemClock};
 
 use crate::config::OnrampConfig;
 use crate::daemon::CapabilitySource;
 use crate::gate::Gate;
 use crate::grants::GrantCache;
-use crate::installer::Installers;
+use crate::installer::{Installers, Profile};
 use crate::net::{ClientIpSource, RateLimiter};
 
 /// The terms the onramp asks the daemon for; `None` takes its maximum.
@@ -35,8 +34,8 @@ pub struct AppState {
     pub grants: Arc<GrantCache>,
     /// The terms asked of the daemon for every capability.
     pub terms: RequestedTerms,
-    /// Served at `GET /v1/profile`; its chain id and `PaymentPool` come from
-    /// the daemon's `/v1/info`, read once at startup.
+    /// The chain and contracts baked into the installers; the chain id and
+    /// `PaymentPool` come from the daemon's `/v1/info`, read once at startup.
     pub profile: Arc<Profile>,
     /// The installer scripts, rendered once at startup with the profile
     /// baked in.

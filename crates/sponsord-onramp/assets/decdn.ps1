@@ -39,8 +39,8 @@
     $DecdnVersion = '{{DECDN_VERSION}}'
     $DecdnSumsSha256 = '{{DECDN_SUMS_SHA256}}'
 
-    # The chain and contracts a download runs against (the onramp's
-    # /v1/profile). $SlashJudge is empty when the onramp names none.
+    # The chain and contracts a download runs against. $SlashJudge is empty
+    # when the onramp names none.
     $ChainId = '{{CHAIN_ID}}'
     $RpcUrl = '{{RPC_URL}}'
     $PaymentPool = '{{PAYMENT_POOL}}'

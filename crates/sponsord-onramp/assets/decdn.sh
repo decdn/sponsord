@@ -27,8 +27,8 @@ DECDN_RELEASE="{{DECDN_RELEASE}}"
 DECDN_VERSION="{{DECDN_VERSION}}"
 DECDN_SUMS_SHA256="{{DECDN_SUMS_SHA256}}"
 
-# The chain and contracts a download runs against (the onramp's /v1/profile).
-# SLASH_JUDGE is empty when the onramp names none.
+# The chain and contracts a download runs against. SLASH_JUDGE is empty when
+# the onramp names none.
 CHAIN_ID="{{CHAIN_ID}}"
 RPC_URL="{{RPC_URL}}"
 PAYMENT_POOL="{{PAYMENT_POOL}}"

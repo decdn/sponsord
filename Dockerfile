@@ -58,6 +58,6 @@ COPY --chmod=0755 dist/${TARGETARCH}/sponsord-onramp /usr/local/bin/sponsord-onr
 USER sponsord
 WORKDIR /home/sponsord
 ENV ONRAMP_BIND=0.0.0.0:8080
-# /healthz, /decdn.sh, /decdn.ps1, /fund, /v1/fund, /v1/capability, /v1/profile.
+# /healthz, /decdn.sh, /decdn.ps1, /fund, /v1/fund, /v1/capability.
 EXPOSE 8080
 ENTRYPOINT ["sponsord-onramp"]

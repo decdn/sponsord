@@ -15,9 +15,6 @@ pub mod routes {
     /// `GET ?client=0x..` → [`CapabilityResponse`](super::CapabilityResponse),
     /// or `204` while none is issued; the installer polls it.
     pub const CAPABILITY: &str = "/v1/capability";
-    /// `GET` → [`Profile`](super::Profile): the chain and contracts a
-    /// download runs `decdn` against.
-    pub const PROFILE: &str = "/v1/profile";
     /// `GET`: the macOS/Linux installer (`sh`).
     pub const INSTALL_SH: &str = "/decdn.sh";
     /// `GET`: the Windows installer (PowerShell).
@@ -56,25 +53,4 @@ pub struct CapabilityResponse {
     pub token: String,
     /// Unix time (seconds) after which the capability is void.
     pub expiry: u64,
-}
-
-/// `GET /v1/profile`: the chain and contracts a download hands to `decdn`.
-/// The installers carry the same values, baked in when they are served.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct Profile {
-    /// EIP-155 id of the chain the contracts are on.
-    pub chain_id: u64,
-    /// JSON-RPC endpoint `decdn` reads the chain through.
-    pub rpc_url: String,
-    /// The `PaymentPool` the capabilities are signed against.
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
-    pub payment_pool: Address,
-    /// The `CapacityBond`, for node discovery.
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
-    pub capacity_bond: Address,
-    /// The `SlashJudge`, when the onramp names one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
-    pub slash_judge: Option<Address>,
 }

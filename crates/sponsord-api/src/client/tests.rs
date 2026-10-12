@@ -253,24 +253,6 @@ async fn other_statuses_carry_the_error_code() {
     ));
 }
 
-#[tokio::test]
-async fn profile_parses() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path(onramp::routes::PROFILE))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "chain_id": 421_614,
-            "rpc_url": "https://rpc.example",
-            "payment_pool": Address::repeat_byte(0x01),
-            "capacity_bond": Address::repeat_byte(0x02),
-        })))
-        .mount(&server)
-        .await;
-    let p = onramp(&server.uri()).profile().await.unwrap();
-    assert_eq!(p.payment_pool, Address::repeat_byte(0x01));
-    assert_eq!(p.slash_judge, None);
-}
-
 #[test]
 fn fund_url_names_the_client() {
     let c = onramp("https://s.example/");
