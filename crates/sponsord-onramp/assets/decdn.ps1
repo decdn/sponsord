@@ -255,10 +255,13 @@
     # This download's key, generated with a random password on first use. A
     # key missing its password or address is replaced, together with the
     # capability bound to it.
-    $Address = if ((Test-Path -PathType Leaf $KeystoreFile) -and
-                   (Test-Path -PathType Leaf $PasswordFile) -and
-                   (Test-Path -PathType Leaf $AddressFile)) {
-      [IO.File]::ReadAllText($AddressFile).Trim()
+    # A string from the start: an `if` that yields nothing would assign
+    # AutomationNull, against which -notmatch filters to an empty, false list.
+    $Address = ''
+    if ((Test-Path -PathType Leaf $KeystoreFile) -and
+        (Test-Path -PathType Leaf $PasswordFile) -and
+        (Test-Path -PathType Leaf $AddressFile)) {
+      $Address = [IO.File]::ReadAllText($AddressFile).Trim()
     }
     if ($Address -notmatch '^0x[0-9a-fA-F]{40}$') {
       foreach ($Stale in $KeystoreFile, (Join-Path $State 'node.secret'), $AddressFile, $CapabilityFile, $ExpiryFile) {
