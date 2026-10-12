@@ -31,14 +31,15 @@ pub struct AppState {
     pub gate: Arc<dyn Gate>,
     /// Where capabilities come from: the sponsord daemon.
     pub daemon: Arc<dyn CapabilitySource>,
-    /// Capabilities issued and waiting for the polling CLI.
+    /// Capabilities issued and waiting for the polling installer.
     pub grants: Arc<GrantCache>,
     /// The terms asked of the daemon for every capability.
     pub terms: RequestedTerms,
     /// Served at `GET /v1/profile`; its chain id and `PaymentPool` come from
     /// the daemon's `/v1/info`, read once at startup.
     pub profile: Arc<Profile>,
-    /// The installer scripts, rendered once at startup.
+    /// The installer scripts, rendered once at startup with the profile
+    /// baked in.
     pub installers: Arc<Installers>,
     /// The time source for rate limits and hand-off expiry.
     pub clock: Arc<dyn Clock>,
@@ -78,6 +79,13 @@ pub async fn build(
         .await
         .map_err(|e| anyhow::anyhow!("read daemon info from {}: {e}", cfg.daemon_url))?;
     cfg.check_against(&info)?;
+    let profile = Profile {
+        chain_id: info.chain_id,
+        rpc_url: cfg.rpc_url.clone(),
+        payment_pool: info.payment_pool,
+        capacity_bond: cfg.capacity_bond,
+        slash_judge: cfg.slash_judge,
+    };
     Ok(AppState {
         gate,
         daemon,
@@ -86,15 +94,8 @@ pub async fn build(
             spending_cap: cfg.spending_cap,
             ttl_secs: cfg.ttl_secs,
         },
-        profile: Arc::new(Profile {
-            chain_id: info.chain_id,
-            rpc_url: cfg.rpc_url.clone(),
-            payment_pool: info.payment_pool,
-            capacity_bond: cfg.capacity_bond,
-            slash_judge: cfg.slash_judge,
-            min_cli_version: cfg.min_cli_version.clone(),
-        }),
-        installers: Arc::new(Installers::render(cfg)),
+        installers: Arc::new(Installers::render(cfg, &profile)),
+        profile: Arc::new(profile),
         clock: Arc::new(SystemClock),
         client_ip: cfg.client_ip.clone(),
         fund_limit: Arc::new(RateLimiter::new(cfg.fund_rate_per_min)),

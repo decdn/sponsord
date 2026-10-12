@@ -185,7 +185,9 @@ async fn capability_maps_204_to_none_and_200_to_the_token() {
         .await;
     Mock::given(method("GET"))
         .and(path(onramp::routes::CAPABILITY))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token": "dcap1:A"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"token": "dcap1:A", "expiry": 99})),
+        )
         .mount(&server)
         .await;
     let c = onramp(&server.uri());
@@ -261,14 +263,12 @@ async fn profile_parses() {
             "rpc_url": "https://rpc.example",
             "payment_pool": Address::repeat_byte(0x01),
             "capacity_bond": Address::repeat_byte(0x02),
-            "min_cli_version": "0.2.0",
         })))
         .mount(&server)
         .await;
     let p = onramp(&server.uri()).profile().await.unwrap();
     assert_eq!(p.payment_pool, Address::repeat_byte(0x01));
     assert_eq!(p.slash_judge, None);
-    assert_eq!(p.min_cli_version, Some(semver::Version::new(0, 2, 0)));
 }
 
 #[test]

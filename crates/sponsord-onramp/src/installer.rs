@@ -1,7 +1,10 @@
 //! The installer scripts served at `GET /decdn.sh` (macOS/Linux) and
 //! `GET /decdn.ps1` (Windows). Each embeds its `assets/` file at compile time
-//! and is rendered once at startup: the onramp URL and the pinned releases
-//! are baked in, so the user sets nothing themselves.
+//! and is rendered once at startup: the onramp URL, the pinned `decdn`
+//! release and the download profile are baked in, so the user sets nothing
+//! themselves.
+
+use sponsord_api::onramp::Profile;
 
 use crate::config::OnrampConfig;
 
@@ -18,14 +21,19 @@ pub struct Installers {
 }
 
 impl Installers {
-    /// Render both templates from `cfg`. Each release's version is passed
-    /// alongside its tag rather than cut out of it by the scripts, so the
-    /// scripts hold no assumption about how either repository tags.
-    /// Every substituted value was checked
-    /// at startup to hold nothing a quoted shell or PowerShell string could
-    /// misread (`config::script_safe_url`, `ReleasePin::new`).
+    /// Render both templates from `cfg` and `profile`. The release's version
+    /// is passed alongside its tag rather than cut out of it by the scripts,
+    /// so the scripts hold no assumption about how decdn tags. Every
+    /// substituted value was checked at startup to hold nothing a quoted
+    /// shell or PowerShell string could misread (`config::script_safe_url`,
+    /// `ReleasePin::new`), or is a number or a hex address. A missing
+    /// `SlashJudge` renders as an empty string.
     #[must_use]
-    pub fn render(cfg: &OnrampConfig) -> Self {
+    pub fn render(cfg: &OnrampConfig, profile: &Profile) -> Self {
+        let slash_judge = profile
+            .slash_judge
+            .map(|a| a.to_string())
+            .unwrap_or_default();
         let render = |template: &str| {
             template
                 .replace("{{ONRAMP_URL}}", &cfg.public_url)
@@ -33,9 +41,11 @@ impl Installers {
                 .replace("{{DECDN_RELEASE}}", &cfg.decdn_release.tag)
                 .replace("{{DECDN_VERSION}}", &cfg.decdn_release.version)
                 .replace("{{DECDN_SUMS_SHA256}}", &cfg.decdn_release.sums_sha256)
-                .replace("{{CLI_RELEASE}}", &cfg.cli_release.tag)
-                .replace("{{CLI_VERSION}}", &cfg.cli_release.version)
-                .replace("{{CLI_SUMS_SHA256}}", &cfg.cli_release.sums_sha256)
+                .replace("{{CHAIN_ID}}", &profile.chain_id.to_string())
+                .replace("{{RPC_URL}}", &profile.rpc_url)
+                .replace("{{PAYMENT_POOL}}", &profile.payment_pool.to_string())
+                .replace("{{CAPACITY_BOND}}", &profile.capacity_bond.to_string())
+                .replace("{{SLASH_JUDGE}}", &slash_judge)
         };
         Self {
             sh: render(DECDN_SH_TEMPLATE),

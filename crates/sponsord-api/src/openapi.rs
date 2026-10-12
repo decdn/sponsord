@@ -41,7 +41,7 @@ struct DaemonDoc;
     info(
         title = "sponsord-onramp",
         description = "The sponsord onramp: a gate in front of the daemon, the installers, and \
-                       the API decdn-sponsored polls.",
+                       the API the installers poll.",
         license(name = "MIT OR Apache-2.0"),
     ),
     paths(
@@ -179,7 +179,7 @@ fn fund() {}
 )]
 fn capability() {}
 
-/// What `decdn-sponsored` needs to run `decdn` against this onramp's pool.
+/// The chain and contracts a download runs `decdn` against.
 #[utoipa::path(get, path = "/v1/profile", responses((status = 200, description = "The download profile", body = Profile)))]
 fn profile() {}
 

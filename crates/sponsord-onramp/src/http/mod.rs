@@ -1,6 +1,6 @@
 //! HTTP surface: `/healthz`, `/decdn.sh` + `/decdn.ps1`, `/fund` (gate
 //! page), `/v1/fund` (issue), `/v1/capability` (poll for the issued token),
-//! `/v1/profile` (what the CLI runs `decdn` with).
+//! `/v1/profile` (the chain and contracts a download runs `decdn` against).
 
 pub mod capability;
 pub mod fund;

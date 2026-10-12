@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "sponsord-onramp",
-    "description": "The sponsord onramp: a gate in front of the daemon, the installers, and the API decdn-sponsored polls.",
+    "description": "The sponsord onramp: a gate in front of the daemon, the installers, and the API the installers poll.",
     "license": {
       "name": "MIT OR Apache-2.0"
     },
@@ -251,7 +251,7 @@
     "/v1/profile": {
       "get": {
         "tags": [],
-        "summary": "What `decdn-sponsored` needs to run `decdn` against this onramp's pool.",
+        "summary": "The chain and contracts a download runs `decdn` against.",
         "operationId": "profile",
         "responses": {
           "200": {
@@ -274,9 +274,16 @@
         "type": "object",
         "description": "The capability issued to a client.",
         "required": [
-          "token"
+          "token",
+          "expiry"
         ],
         "properties": {
+          "expiry": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix time (seconds) after which the capability is void.",
+            "minimum": 0
+          },
           "token": {
             "type": "string",
             "description": "The `dcap1:` token."
@@ -381,7 +388,7 @@
       },
       "Profile": {
         "type": "object",
-        "description": "`GET /v1/profile`: the chain and contracts the CLI hands to `decdn`. The\nCLI reads it on every run, so the onramp can change any of it without\nusers reinstalling.",
+        "description": "`GET /v1/profile`: the chain and contracts a download hands to `decdn`.\nThe installers carry the same values, baked in when they are served.",
         "required": [
           "chain_id",
           "rpc_url",
@@ -398,14 +405,6 @@
             "format": "int64",
             "description": "EIP-155 id of the chain the contracts are on.",
             "minimum": 0
-          },
-          "min_cli_version": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Oldest `decdn-sponsored` this onramp works with; an older CLI tells\nthe user to re-run the installer.",
-            "example": "0.2.0"
           },
           "payment_pool": {
             "type": "string",
