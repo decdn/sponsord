@@ -44,8 +44,9 @@ release.
   `expiry`** beside its `token`, so the installer can replace a capability
   near expiry without decoding it.
 - **`decdn.sh` says how to put `~/.local/bin` on `PATH`.** When the
-  directory is missing from `PATH`, a run prints the line that adds it for
-  the user's shell (zsh, bash, fish, or `~/.profile` otherwise).
+  directory is missing from `PATH`, a run without `pull` prints the line
+  that adds it for the user's shell (zsh, bash, fish, or `~/.profile`
+  otherwise).
 
 ### Changed
 

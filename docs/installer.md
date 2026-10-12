@@ -23,7 +23,7 @@ release's `SHA256SUMS` against the pinned digest and the archive against
 `SHA256SUMS`. A marker in `~/.decdn/installer/` records what is installed,
 so a later run with the same pin downloads nothing.
 
-To install without downloading anything:
+To install `decdn` without pulling a bundle:
 
 ```bash
 curl -fsSL https://<onramp>/decdn.sh | sh
