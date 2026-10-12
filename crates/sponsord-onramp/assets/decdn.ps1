@@ -183,10 +183,11 @@
     # or $null while there is none yet.
     $GetCapability = {
       param($Address)
+      $Uri = "$OnrampUrl/v1/capability?client=$Address"
       try {
-        $Resp = Invoke-WebRequest -UseBasicParsing -Uri "$OnrampUrl/v1/capability?client=$Address"
+        $Resp = Invoke-WebRequest -UseBasicParsing -Uri $Uri
       } catch {
-        throw "decdn: $OnrampUrl/v1/capability failed: $($_.Exception.Message)"
+        throw "decdn: $Uri failed: $($_.Exception.Message)"
       }
       if ($Resp.StatusCode -eq 204) { return $null }
       $Body = $Resp.Content | ConvertFrom-Json
