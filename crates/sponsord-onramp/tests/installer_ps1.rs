@@ -261,26 +261,28 @@ async fn pull_passes_the_gate_and_resumes_a_failed_download_without_it() {
     let fx = Fixture::new("pull").await;
 
     let (ok, stdout, stderr) = fx.pull("3").await;
-    assert!(!ok, "a failed decdn fails the run\n{stdout}\n{stderr}");
-    assert!(stdout.contains("Installing decdn v0.1.0"), "{stdout}");
+    let both = format!("stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(!ok, "a failed decdn fails the run\n{both}");
+    assert!(stdout.contains("Installing decdn v0.1.0"), "{both}");
     assert!(
         stdout.contains("Open this link to start the download:"),
-        "{stdout}"
+        "{both}"
     );
     assert!(
         stderr.contains("Re-run the same command to resume"),
-        "{stderr}"
+        "{both}"
     );
 
     let (ok, stdout, stderr) = fx.pull("0").await;
-    assert!(ok, "{stdout}\n{stderr}");
+    let both = format!("stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(ok, "{both}");
     assert!(
         stdout.contains("decdn v0.1.0 is already installed."),
-        "{stdout}"
+        "{both}"
     );
     assert!(
         !stdout.contains("Open this link"),
-        "resumed without the gate\n{stdout}"
+        "resumed without the gate\n{both}"
     );
 
     let pool = alloy_primitives::Address::repeat_byte(0x22);
