@@ -8,9 +8,8 @@
 # Install, then download a bundle paid for by this onramp's sponsor:
 #   & ([scriptblock]::Create((irm <onramp>/decdn.ps1))) pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]
 #
-# The hash can also be written decdn://<namespace>/<hash>, a shorthand for
-# `<hash> --namespace <namespace>`. From the first flag this script does not
-# take, the arguments are appended to `decdn bundle pull` as given.
+# From the first flag this script does not take, the arguments are appended
+# to `decdn bundle pull` as given.
 #
 # Each download gets a throwaway key under ~\.decdn\sponsored\downloads\<hash>\
 # and a capability for it, issued once the person passes the gate in the
@@ -68,7 +67,6 @@
     $Hash = $null
     $Output = '.'
     $Namespace = $null
-    $RefNamespace = $null
     $ExtraArgs = @()
     if ($args.Count -gt 0) {
       if ($args[0] -ne 'pull') { throw $Usage }
@@ -89,18 +87,6 @@
           # A BLAKE3 hash as the website prints it (`b3:<hex>`, `0x<hex>` or
           # bare hex), as 64 lowercase hex characters.
           $h = $a.Trim()
-          # decdn://<namespace>/<hash> carries the namespace with the hash.
-          if ($h.StartsWith('decdn://')) {
-            $h = $h.Substring(8)
-            $Slash = $h.IndexOf('/')
-            if ($Slash -ge 0) {
-              $RefNamespace = $h.Substring(0, $Slash)
-              $h = $h.Substring($Slash + 1)
-              if (-not $RefNamespace) {
-                throw "decdn: no namespace in $a (expected decdn://<namespace>/<hash>)"
-              }
-            }
-          }
           if ($h.StartsWith('b3:')) { $h = $h.Substring(3) } elseif ($h.StartsWith('0x')) { $h = $h.Substring(2) }
           $h = $h.ToLowerInvariant()
           if ($h -notmatch '^[0-9a-f]{64}$') {
@@ -111,15 +97,9 @@
         }
       }
       if (-not $Hash) { throw $Usage }
-      if ($RefNamespace) {
-        if ($null -ne $Namespace) {
-          throw 'decdn: the namespace is given twice: in decdn://<namespace>/<hash> and with --namespace'
-        }
-        $Namespace = $RefNamespace
-      }
       # Namespace 0 means "no namespace" to decdn, so it is refused here.
       if ($null -ne $Namespace -and $Namespace -notmatch '^0*[1-9][0-9]*$') {
-        throw "decdn: the namespace must be a positive integer: $Namespace"
+        throw "decdn: --namespace must be a positive integer: $Namespace"
       }
     }
 

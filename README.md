@@ -81,9 +81,8 @@ default) and tops it up whenever it is below the low-water mark.
    `--namespace` is optional. It takes the numeric deCDN namespace the bundle
    is published under, not your pool id, and lets a node that hasn't cached
    the bundle fetch it from that namespace's origins. Without it, only nodes
-   that already cache the bundle can serve it. `pull decdn://<id>/<hash>`
-   says the same in one argument, and any other flag goes straight to
-   `decdn bundle pull` ([installer](docs/installer.md)).
+   that already cache the bundle can serve it. Any other flag goes straight
+   to `decdn bundle pull` ([installer](docs/installer.md)).
 
 ## Documentation
 

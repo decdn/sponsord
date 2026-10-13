@@ -65,12 +65,7 @@ nodes will refuse midway.
 
 `--namespace` is passed to `decdn` as-is: it lets a node that hasn't cached
 the bundle fetch it from that namespace's origins. It never changes which
-bytes are accepted. `decdn://<namespace>/<hash>` is shorthand for
-`<hash> --namespace <namespace>`, so a website can print one link:
-
-```bash
-curl -fsSL https://<onramp>/decdn.sh | sh -s -- pull decdn://<namespace>/<hash>
-```
+bytes are accepted.
 
 Any other flag, such as `--jobs`, `--include` or `--exclude`, goes to
 `decdn bundle pull` unchanged, together with everything after it:

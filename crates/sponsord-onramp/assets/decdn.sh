@@ -9,9 +9,8 @@
 # onramp's sponsor:
 #   curl -fsSL <onramp>/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]
 #
-# The hash can also be written decdn://<namespace>/<hash>, a shorthand for
-# `<hash> --namespace <namespace>`. From the first flag this script does not
-# take, the arguments are appended to `decdn bundle pull` as given.
+# From the first flag this script does not take, the arguments are appended
+# to `decdn bundle pull` as given.
 #
 # Without arguments, it only installs decdn into ~/.local/bin and checks that
 # the directory is on PATH, printing how to add it when it is not:
@@ -342,7 +341,7 @@ pull() {
 }
 
 main() {
-  hash="" output="." namespace="" ref_namespace=""
+  hash="" output="." namespace=""
   if [ "$#" -gt 0 ]; then
     [ "$1" = pull ] || usage
     shift
@@ -362,33 +361,19 @@ main() {
         -*) break ;;
         *)
           [ -z "$hash" ] || usage
-          # decdn://<namespace>/<hash> carries the namespace with the hash.
-          ref="${1#decdn://}"
-          case "$1" in
-            decdn://*/*)
-              ref_namespace="${ref%%/*}"
-              ref="${ref#*/}"
-              [ -n "$ref_namespace" ] || die "no namespace in ${1} (expected decdn://<namespace>/<hash>)"
-              ;;
-          esac
-          hash="$(normalize_hash "$ref")" ||
+          hash="$(normalize_hash "$1")" ||
             die "not a BLAKE3 hash (expected 64 hex characters, optionally b3:-prefixed): $1"
           shift
           ;;
       esac
     done
     [ -n "$hash" ] || usage
-    if [ -n "$ref_namespace" ]; then
-      [ -z "$namespace" ] ||
-        die "the namespace is given twice: in decdn://<namespace>/<hash> and with --namespace"
-      namespace="$ref_namespace"
-    fi
     # Namespace 0 means "no namespace" to decdn, so it is refused here.
     case "$namespace" in
       '') ;;
-      *[!0-9]*) die "the namespace must be a positive integer: ${namespace}" ;;
+      *[!0-9]*) die "--namespace must be a positive integer: ${namespace}" ;;
       *[!0]*) ;;
-      *) die "the namespace must be a positive integer: ${namespace}" ;;
+      *) die "--namespace must be a positive integer: ${namespace}" ;;
     esac
   fi
 
