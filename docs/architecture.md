@@ -63,7 +63,7 @@ Published commands and downloads in progress read these, so a change to any
 of them is called out as contract-breaking in the changelog:
 
 - the installers' arguments (`pull <hash> [-o <dir>] [--namespace <id>]
-  [-- <bundle pull flags>]`, with `<hash>` also accepted as
+  [<bundle pull flags>]`, with `<hash>` also accepted as
   `decdn://<namespace>/<hash>`);
 - the layout under `~/.decdn/sponsored/` (`downloads/<hash>/` with
   `keystore.json`, `password`, `address`, `capability` and `expiry`), which

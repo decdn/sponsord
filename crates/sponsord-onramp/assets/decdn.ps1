@@ -6,12 +6,11 @@
 # Install decdn:
 #   irm <onramp>/decdn.ps1 | iex
 # Install, then download a bundle paid for by this onramp's sponsor:
-#   & ([scriptblock]::Create((irm <onramp>/decdn.ps1))) pull b3:<hash> [-o <dir>] [--namespace <id>] ['--' <bundle pull flags>]
+#   & ([scriptblock]::Create((irm <onramp>/decdn.ps1))) pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]
 #
 # The hash can also be written decdn://<namespace>/<hash>, a shorthand for
-# `<hash> --namespace <namespace>`. Flags after '--' are appended to
-# `decdn bundle pull` as given; the separator is quoted because PowerShell
-# drops a bare `--`.
+# `<hash> --namespace <namespace>`. From the first flag this script does not
+# take, the arguments are appended to `decdn bundle pull` as given.
 #
 # Each download gets a throwaway key under ~\.decdn\sponsored\downloads\<hash>\
 # and a capability for it, issued once the person passes the gate in the
@@ -63,7 +62,7 @@
     # needs an hour on top.
     $ExpiryMarginSecs = 4020
 
-    $Usage = "usage: decdn.ps1 [pull <hash> [-o <dir>] [--namespace <id>] ['--' <bundle pull flags>]]"
+    $Usage = 'usage: decdn.ps1 [pull <hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]]'
 
     # Parse the arguments before downloading anything.
     $Hash = $null
@@ -76,14 +75,15 @@
       $i = 1
       while ($i -lt $args.Count) {
         $a = [string]$args[$i]
-        if ($a -eq '--') {
-          $ExtraArgs = @($args | Select-Object -Skip ($i + 1) | ForEach-Object { [string]$_ })
-          break
-        } elseif ($a -in '-o', '--output', '--namespace') {
+        if ($a -in '-o', '--output', '--namespace') {
           if ($i + 1 -ge $args.Count) { throw $Usage }
           if ($a -eq '--namespace') { $Namespace = [string]$args[$i + 1] } else { $Output = [string]$args[$i + 1] }
           $i += 2
-        } elseif ($a.StartsWith('-') -or $Hash) {
+        } elseif ($a.StartsWith('-')) {
+          # The first other flag starts decdn bundle pull's flags.
+          $ExtraArgs = @($args | Select-Object -Skip $i | ForEach-Object { [string]$_ })
+          break
+        } elseif ($Hash) {
           throw $Usage
         } else {
           # A BLAKE3 hash as the website prints it (`b3:<hex>`, `0x<hex>` or
@@ -248,7 +248,7 @@
     if (-not $Hash) {
       Write-Host ''
       Write-Host 'decdn is ready. Download a bundle with:'
-      Write-Host "  & ([scriptblock]::Create((irm $OnrampUrl/decdn.ps1))) pull b3:<hash> [-o <dir>] [--namespace <id>] ['--' <bundle pull flags>]"
+      Write-Host "  & ([scriptblock]::Create((irm $OnrampUrl/decdn.ps1))) pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]"
       return
     }
 

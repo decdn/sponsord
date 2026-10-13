@@ -188,7 +188,7 @@ impl Fixture {
         }
     }
 
-    /// Run `pull decdn://1/<HASH> '--' --jobs 8` and pass the gate for
+    /// Run `pull decdn://1/<HASH> --jobs 8` and pass the gate for
     /// whatever key the script prints a gate link for. Returns (success,
     /// stdout, stderr).
     async fn pull(&self, stub_exit: &str) -> (bool, String, String) {
@@ -197,7 +197,7 @@ impl Fixture {
         fs::create_dir_all(&home).unwrap();
         fs::create_dir_all(&local).unwrap();
         let command = format!(
-            "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '{}'))) pull decdn://1/b3:{HASH} '--' --jobs 8",
+            "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '{}'))) pull decdn://1/b3:{HASH} --jobs 8",
             self.script.display()
         );
         let mut child = tokio::process::Command::new("powershell")

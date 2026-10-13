@@ -314,10 +314,10 @@ async fn pull_passes_the_gate_and_runs_decdn_with_the_capability() {
 }
 
 #[tokio::test]
-async fn a_decdn_uri_names_the_namespace_and_flags_after_the_separator_reach_decdn() {
+async fn a_decdn_uri_names_the_namespace_and_unknown_flags_reach_decdn() {
     let fx = Fixture::new("uri_and_extra_flags").await;
     let uri = format!("decdn://7/b3:{HASH}");
-    let args = ["pull", &uri, "--", "--jobs", "8", "--include", "*.txt"];
+    let args = ["pull", &uri, "--jobs", "8", "--include", "*.txt"];
     fx.run_ok(&args, &[]).await;
 
     let calls = fx.calls();
@@ -452,13 +452,12 @@ async fn bad_arguments_are_refused_before_installing() {
         &["pull", &no_namespace],
         &["pull", &named_namespace],
         &["pull", &one_namespace, "--namespace", "1"],
-        &["pull", "--", "--jobs", "8"],
+        &["pull", "--jobs", "8"],
         &["pull", "b3:nothex"][..],
         &["pull"],
         &["fetch", HASH],
         &["pull", HASH, "--namespace", "0"],
         &["pull", HASH, "--namespace", "x1"],
-        &["pull", HASH, "--bogus"],
     ] {
         let run = fx.run_with(args, &[]).await;
         assert!(!run.ok, "{args:?}");

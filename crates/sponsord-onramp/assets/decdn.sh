@@ -7,11 +7,11 @@
 #
 # It installs decdn and, given `pull`, downloads a bundle paid for by this
 # onramp's sponsor:
-#   curl -fsSL <onramp>/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [-- <bundle pull flags>]
+#   curl -fsSL <onramp>/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]
 #
 # The hash can also be written decdn://<namespace>/<hash>, a shorthand for
-# `<hash> --namespace <namespace>`. Flags after `--` are appended to
-# `decdn bundle pull` as given.
+# `<hash> --namespace <namespace>`. From the first flag this script does not
+# take, the arguments are appended to `decdn bundle pull` as given.
 #
 # Without arguments, it only installs decdn into ~/.local/bin and checks that
 # the directory is on PATH, printing how to add it when it is not:
@@ -69,7 +69,7 @@ die() {
 }
 
 usage() {
-  echo "usage: sh decdn.sh [pull <hash> [-o <dir>] [--namespace <id>] [-- <bundle pull flags>]]" >&2
+  echo "usage: sh decdn.sh [pull <hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]]" >&2
   exit 2
 }
 
@@ -358,11 +358,8 @@ main() {
           namespace="$2"
           shift 2
           ;;
-        --)
-          shift
-          break
-          ;;
-        -*) usage ;;
+        # The first other flag starts decdn bundle pull's flags.
+        -*) break ;;
         *)
           [ -z "$hash" ] || usage
           # decdn://<namespace>/<hash> carries the namespace with the hash.
@@ -409,7 +406,7 @@ main() {
   fi
   echo ""
   echo "decdn is installed at ${DECDN}. Download a bundle with:"
-  echo "  curl -fsSL ${ONRAMP_URL}/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [-- <bundle pull flags>]"
+  echo "  curl -fsSL ${ONRAMP_URL}/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]"
   path_hint
 }
 

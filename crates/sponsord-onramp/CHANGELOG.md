@@ -18,11 +18,11 @@ release.
 ### Added
 
 - **`decdn.sh` and `decdn.ps1` take `decdn://<namespace>/<hash>` and
-  pass flags after `--` to `decdn bundle pull`.** The URI is shorthand for
-  `<hash> --namespace <namespace>`. Everything after the separator (quoted
-  as `'--'` in PowerShell) is appended to the `decdn bundle pull` call
-  unchanged. Both add to the installers' arguments and break nothing that
-  already runs.
+  pass other flags to `decdn bundle pull`.** The URI is shorthand for
+  `<hash> --namespace <namespace>`. The first flag the script does not take
+  (it refused one before), and everything after it, is appended to the
+  `decdn bundle pull` call unchanged. Both add to the installers' arguments
+  and break nothing that already runs.
 
 ## [0.0.3] - 2026-10-12
 
