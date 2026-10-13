@@ -63,18 +63,17 @@ A capability within about an hour of expiring is replaced by a fresh key
 and a new trip through the gate, so a download never starts on one that
 nodes will refuse midway.
 
-`--namespace` is passed to `decdn` as-is: it lets a node that hasn't cached
-the bundle fetch it from that namespace's origins. It never changes which
-bytes are accepted.
-
-Any other flag, such as `--jobs`, `--include` or `--exclude`, goes to
-`decdn bundle pull` unchanged, together with everything after it:
+The first argument shaped like a hash names the download. Every other
+argument goes to `decdn bundle pull` unchanged, and `decdn` checks it:
 
 ```bash
-curl -fsSL https://<onramp>/decdn.sh | sh -s -- pull b3:<hash> -o out --jobs 8 --include '*.txt'
+curl -fsSL https://<onramp>/decdn.sh | sh -s -- pull b3:<hash> -o out --namespace 7 --jobs 8 --include '*.txt'
 ```
 
-So the hash, `-o` and `--namespace` come first. A flag the script already
-passes (`--capability`, `--keystore`, `--data-dir`, the chain and contract
-flags) can be given again this way, and what `decdn` then does is up to
-`decdn`.
+Without `-o` (or `--output`), the script adds `-o .`. `--namespace` lets a
+node that hasn't cached the bundle fetch it from that namespace's origins;
+it never changes which bytes are accepted. A bad value is reported by
+`decdn` after the gate, and running the fixed command again skips the gate.
+A flag the script already passes (`--capability`, `--keystore`,
+`--data-dir`, the chain and contract flags) can be given again this way,
+and what `decdn` then does is up to `decdn`.

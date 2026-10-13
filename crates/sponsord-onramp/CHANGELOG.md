@@ -17,11 +17,12 @@ release.
 
 ### Added
 
-- **`decdn.sh` and `decdn.ps1` pass other flags to `decdn bundle pull`.**
-  The first flag the script does not take (it refused one before), and
-  everything after it, is appended to the `decdn bundle pull` call
-  unchanged. This adds to the installers' arguments and breaks nothing that
-  already runs.
+- **`decdn.sh` and `decdn.ps1` pass every argument but the hash to
+  `decdn bundle pull`.** Any `decdn bundle pull` flag now works in the
+  one-liner (an unknown flag was refused before), with `-o .` added when no
+  output directory is given. `decdn` checks the arguments, so a bad
+  `--namespace` is reported after the gate instead of before the install.
+  Every command that worked before still works.
 
 ## [0.0.3] - 2026-10-12
 

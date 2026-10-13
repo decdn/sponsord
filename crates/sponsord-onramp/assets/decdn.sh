@@ -9,8 +9,8 @@
 # onramp's sponsor:
 #   curl -fsSL <onramp>/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]
 #
-# From the first flag this script does not take, the arguments are appended
-# to `decdn bundle pull` as given.
+# Every argument but the hash goes to `decdn bundle pull` as given, with
+# `-o .` added when none of them sets the output directory.
 #
 # Without arguments, it only installs decdn into ~/.local/bin and checks that
 # the directory is on PATH, printing how to add it when it is not:
@@ -273,10 +273,10 @@ ensure_capability() {
   printf '%s' "$TOKEN" >"${STATE}/capability"
 }
 
-# pull <hash> <output> <namespace> [<bundle pull flag>...]
+# pull <hash> <bundle pull arg>...
 pull() {
-  hash="$1" output="$2" namespace="$3"
-  shift 3
+  hash="$1"
+  shift
   # Key material is private; the downloaded files keep the user's umask.
   user_umask="$(umask)"
   umask 077
@@ -315,8 +315,8 @@ pull() {
     data_dir="$STATE"
   fi
 
-  # The caller's extra flags come last, unchecked.
-  set -- bundle pull --hash "$hash" -o "$output" \
+  # The caller's arguments go in unchecked, before the ones this run owns.
+  set -- bundle pull --hash "$hash" "$@" \
     --capability "$TOKEN" \
     --keystore "${STATE}/keystore.json" \
     --keystore-password-file "${STATE}/password" \
@@ -325,9 +325,7 @@ pull() {
     --payment-pool-address "$PAYMENT_POOL" \
     --capacity-bond-address "$CAPACITY_BOND" \
     --chain-id "$CHAIN_ID" \
-    ${namespace:+--namespace "$namespace"} \
-    ${SLASH_JUDGE:+--slash-judge-address "$SLASH_JUDGE"} \
-    "$@"
+    ${SLASH_JUDGE:+--slash-judge-address "$SLASH_JUDGE"}
 
   umask "$user_umask"
   status=0
@@ -341,40 +339,29 @@ pull() {
 }
 
 main() {
-  hash="" output="." namespace=""
+  hash=""
   if [ "$#" -gt 0 ]; then
     [ "$1" = pull ] || usage
     shift
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        -o | --output)
-          [ "$#" -ge 2 ] || usage
-          output="$2"
-          shift 2
-          ;;
-        --namespace)
-          [ "$#" -ge 2 ] || usage
-          namespace="$2"
-          shift 2
-          ;;
-        # The first other flag starts decdn bundle pull's flags.
-        -*) break ;;
-        *)
-          [ -z "$hash" ] || usage
-          hash="$(normalize_hash "$1")" ||
-            die "not a BLAKE3 hash (expected 64 hex characters, optionally b3:-prefixed): $1"
-          shift
-          ;;
+    # The first hash-shaped argument names the download; the others are
+    # rotated back into "$@" for decdn bundle pull, which checks them.
+    has_output=""
+    n="$#"
+    while [ "$n" -gt 0 ]; do
+      arg="$1"
+      shift
+      n=$((n - 1))
+      if [ -z "$hash" ] && h="$(normalize_hash "$arg")"; then
+        hash="$h"
+        continue
+      fi
+      case "$arg" in
+        -o* | --output | --output=*) has_output=1 ;;
       esac
+      set -- "$@" "$arg"
     done
     [ -n "$hash" ] || usage
-    # Namespace 0 means "no namespace" to decdn, so it is refused here.
-    case "$namespace" in
-      '') ;;
-      *[!0-9]*) die "--namespace must be a positive integer: ${namespace}" ;;
-      *[!0]*) ;;
-      *) die "--namespace must be a positive integer: ${namespace}" ;;
-    esac
+    [ -n "$has_output" ] || set -- -o . "$@"
   fi
 
   detect_target
@@ -386,7 +373,7 @@ main() {
   fetch_bin decdn decdn "$DECDN_RELEASE" "$DECDN_VERSION" "$DECDN_SUMS_SHA256"
 
   if [ -n "$hash" ]; then
-    pull "$hash" "$output" "$namespace" "$@"
+    pull "$hash" "$@"
     return 0
   fi
   echo ""
