@@ -314,6 +314,36 @@ async fn pull_passes_the_gate_and_runs_decdn_with_the_capability() {
 }
 
 #[tokio::test]
+async fn a_decdn_uri_names_the_namespace_and_flags_after_the_separator_reach_decdn() {
+    let fx = Fixture::new("uri_and_extra_flags").await;
+    let uri = format!("decdn://7/b3:{HASH}");
+    let args = ["pull", &uri, "--", "--jobs", "8", "--include", "*.txt"];
+    fx.run_ok(&args, &[]).await;
+
+    let calls = fx.calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(
+        calls[0].starts_with(&format!("bundle pull --hash {HASH} -o . ")),
+        "{}",
+        calls[0]
+    );
+    assert!(
+        calls[0].ends_with(" --chain-id 421614 --namespace 7 --jobs 8 --include *.txt"),
+        "{}",
+        calls[0]
+    );
+
+    // The namespace may be left out of the URI.
+    let uri = format!("decdn://{HASH}");
+    fx.run_ok(&["pull", &uri], &[]).await;
+    assert!(
+        fx.calls()[1].ends_with(" --chain-id 421614"),
+        "{:?}",
+        fx.calls()
+    );
+}
+
+#[tokio::test]
 async fn a_failed_pull_resumes_with_the_same_key_and_capability() {
     let fx = Fixture::new("resume").await;
 
@@ -413,7 +443,16 @@ async fn a_busy_shared_data_dir_runs_the_download_in_its_own() {
 #[tokio::test]
 async fn bad_arguments_are_refused_before_installing() {
     let fx = Fixture::new("bad_args").await;
+    let zero_namespace = format!("decdn://0/{HASH}");
+    let no_namespace = format!("decdn:///{HASH}");
+    let named_namespace = format!("decdn://x/{HASH}");
+    let one_namespace = format!("decdn://1/{HASH}");
     for args in [
+        &["pull", &zero_namespace][..],
+        &["pull", &no_namespace],
+        &["pull", &named_namespace],
+        &["pull", &one_namespace, "--namespace", "1"],
+        &["pull", "--", "--jobs", "8"],
         &["pull", "b3:nothex"][..],
         &["pull"],
         &["fetch", HASH],

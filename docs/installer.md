@@ -4,11 +4,11 @@ What happens on a user's machine. One command installs `decdn` and
 downloads a bundle, paid for by the onramp's sponsor:
 
 ```bash
-curl -fsSL https://<onramp>/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>]
+curl -fsSL https://<onramp>/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [-- <bundle pull flags>]
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://<onramp>/decdn.ps1))) pull b3:<hash> [-o <dir>] [--namespace <id>]
+& ([scriptblock]::Create((irm https://<onramp>/decdn.ps1))) pull b3:<hash> [-o <dir>] [--namespace <id>] ['--' <bundle pull flags>]
 ```
 
 The onramp serves each script with its own URL, the pinned `decdn` release
@@ -39,7 +39,7 @@ on every run. On macOS and Linux it leaves shell startup files alone: when
 user's shell (`~/.zshrc`, `~/.bashrc` or `~/.bash_profile`, `fish_add_path`,
 or `~/.profile`).
 
-## `pull <hash> [-o <dir>] [--namespace <id>]`
+## `pull <hash> [-o <dir>] [--namespace <id>] [-- <bundle pull flags>]`
 
 1. Opens `~/.decdn/sponsored/downloads/<hash>/` and makes a throwaway key
    there with `decdn key-gen`, under a random password. Nothing to manage.
@@ -65,4 +65,15 @@ nodes will refuse midway.
 
 `--namespace` is passed to `decdn` as-is: it lets a node that hasn't cached
 the bundle fetch it from that namespace's origins. It never changes which
-bytes are accepted.
+bytes are accepted. `decdn://<namespace>/<hash>` is shorthand for
+`<hash> --namespace <namespace>`, so a website can print one link:
+
+```bash
+curl -fsSL https://<onramp>/decdn.sh | sh -s -- pull decdn://<namespace>/<hash>
+```
+
+Everything after `--` is appended to `decdn bundle pull` unchanged, for
+flags such as `--jobs`, `--include` or `--exclude`. A flag the script
+already passes (`--capability`, `--keystore`, `--data-dir`, the chain and
+contract flags) can be given again this way, and what `decdn` then does is
+up to `decdn`. PowerShell drops a bare `--`, so quote it there: `'--'`.
