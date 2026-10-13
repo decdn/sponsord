@@ -314,16 +314,16 @@ async fn pull_passes_the_gate_and_runs_decdn_with_the_capability() {
 }
 
 #[tokio::test]
-async fn every_argument_but_the_hash_reaches_decdn_as_given() {
+async fn every_argument_after_the_hash_reaches_decdn_as_given() {
     let fx = Fixture::new("pass_through").await;
 
-    // The hash may come anywhere; an output flag in any form replaces `-o .`.
+    // An output flag in any form replaces `-o .`.
     let args = [
-        "pull",
+        PULL[0],
+        PULL[1],
         "--jobs",
         "8",
         "--output=out",
-        PULL[1],
         "--include",
         "*.txt",
     ];
@@ -448,6 +448,7 @@ async fn bad_arguments_are_refused_before_installing() {
         &["pull", "b3:nothex"],
         &["pull"],
         &["fetch", HASH],
+        &["pull", "-o", "out", HASH],
     ] {
         let run = fx.run_with(args, &[]).await;
         assert!(!run.ok, "{args:?}");

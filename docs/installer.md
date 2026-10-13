@@ -63,8 +63,8 @@ A capability within about an hour of expiring is replaced by a fresh key
 and a new trip through the gate, so a download never starts on one that
 nodes will refuse midway.
 
-The first argument shaped like a hash names the download. Every other
-argument goes to `decdn bundle pull` unchanged, and `decdn` checks it:
+The hash comes first and names the download. Every argument after it goes
+to `decdn bundle pull` unchanged, and `decdn` checks it:
 
 ```bash
 curl -fsSL https://<onramp>/decdn.sh | sh -s -- pull b3:<hash> -o out --namespace 7 --jobs 8 --include '*.txt'

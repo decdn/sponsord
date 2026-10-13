@@ -9,8 +9,8 @@
 # onramp's sponsor:
 #   curl -fsSL <onramp>/decdn.sh | sh -s -- pull b3:<hash> [-o <dir>] [--namespace <id>] [<bundle pull flags>]
 #
-# Every argument but the hash goes to `decdn bundle pull` as given, with
-# `-o .` added when none of them sets the output directory.
+# The hash comes first. Every argument after it goes to `decdn bundle pull`
+# as given, with `-o .` added when none of them sets the output directory.
 #
 # Without arguments, it only installs decdn into ~/.local/bin and checks that
 # the directory is on PATH, printing how to add it when it is not:
@@ -341,26 +341,17 @@ pull() {
 main() {
   hash=""
   if [ "$#" -gt 0 ]; then
-    [ "$1" = pull ] || usage
-    shift
-    # The first hash-shaped argument names the download; the others are
-    # rotated back into "$@" for decdn bundle pull, which checks them.
+    [ "$1" = pull ] && [ "$#" -ge 2 ] || usage
+    hash="$(normalize_hash "$2")" ||
+      die "not a BLAKE3 hash (expected 64 hex characters, optionally b3:-prefixed): $2"
+    shift 2
+    # The rest go to decdn bundle pull, which checks them.
     has_output=""
-    n="$#"
-    while [ "$n" -gt 0 ]; do
-      arg="$1"
-      shift
-      n=$((n - 1))
-      if [ -z "$hash" ] && h="$(normalize_hash "$arg")"; then
-        hash="$h"
-        continue
-      fi
+    for arg in "$@"; do
       case "$arg" in
         -o* | --output | --output=*) has_output=1 ;;
       esac
-      set -- "$@" "$arg"
     done
-    [ -n "$hash" ] || usage
     [ -n "$has_output" ] || set -- -o . "$@"
   fi
 
