@@ -248,8 +248,9 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo nextest run --workspace --locked --no-tests=pass
 
-      # Not here, unlike decdn: publish-crates.sh runs `cargo publish --dry-run`
-      # at publish time.
+      # Not here, unlike decdn: `cargo publish --dry-run` verify-builds every
+      # packaged crate, a second workspace build; publish-crates.sh runs it at
+      # publish time.
 
       # Every published crate's public Rust API against the previous release
       # (the commit of the baseline `tag` picked and verified, by SHA so the

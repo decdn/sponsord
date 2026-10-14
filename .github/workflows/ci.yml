@@ -335,7 +335,9 @@ jobs:
       - run: .github/scripts/cargo-deny-warn.sh
 
   # Static checks that keep the release and publish steps from failing late.
-  # publish-crates.sh runs the full `cargo publish --dry-run` at release time.
+  # The full `cargo publish --dry-run` verify-builds every packaged crate, a
+  # second workspace build, so it runs only in publish-crates.sh at release
+  # time; check-package-embeds.sh is the cheap PR-time part of it.
   packaging:
     name: packaging
     runs-on: ubuntu-latest
@@ -363,9 +365,10 @@ jobs:
   # Early warning, not a gate: the next decdn sponsord will move its lock to.
   # `bump-decdn.sh canary` takes every decdn crate from decdn main through a
   # [patch.crates-io], points decdn-e2e at `branch = "main"`, and moves the
-  # requirements to main's workspace version; then the lock moves to decdn
-  # main's head. A failure here means the next bump needs work; ci-success
-  # lets it fail.
+  # requirements to the caret range of main's workspace version; then the
+  # lock moves to decdn main's head, and `canary-check` fails the job if any
+  # decdn crate stayed on crates.io (a [patch] entry cargo did not use). A
+  # failure here means the next bump needs work; ci-success lets it fail.
   decdn-main:
     name: decdn main canary
     runs-on: ubuntu-latest
@@ -406,6 +409,7 @@ jobs:
           args=()
           while read -r crate; do args+=(--package "$crate"); done <<<"$crates"
           cargo update "${args[@]}"
+          .github/scripts/bump-decdn.sh canary-check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo nextest run --workspace --no-tests=pass
 

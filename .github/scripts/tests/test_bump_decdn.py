@@ -180,6 +180,35 @@ def test_rewrite_fails_without_any_crates_io_decdn_dependency(tmp_path):
         bd.rewrite(repo, "v0.1.0")
 
 
+def test_rewrite_exact_pins_every_requirement_to_the_version(tmp_path):
+    repo = build(tmp_path, version="0.1.0")
+    bd.rewrite(repo, "v0.1.3", exact=True)
+    assert requirements(repo) == {"=0.1.3"}
+    bd.rewrite(repo, "v0.1.3")
+    assert requirements(repo) == {"0.1"}
+
+
+def move_lock(repo: Path, old: str, new: str, sha: str) -> None:
+    """What `cargo update` does to the fixture lock: every decdn crate to <new>."""
+    lock = repo / "Cargo.lock"
+    lock.write_text(lock.read_text().replace(f'version = "{old}"', f'version = "{new}"')
+                    .replace(f"tag=v{old}#{SHA}", f"tag=v{new}#{sha}"))
+
+
+def test_a_bump_across_the_caret_range_ends_where_the_checker_agrees(tmp_path):
+    # The sequence open-decdn-bump.sh runs, with cargo's part simulated.
+    repo = build(tmp_path, version="0.1.0")
+    assert check(repo)[0] == []
+    new_sha = "1" * 40
+    bd.rewrite(repo, "v0.2.0", exact=True)
+    move_lock(repo, "0.1.0", "0.2.0", new_sha)
+    bd.rewrite(repo, "v0.2.0")
+    assert check(repo)[0] == []
+    assert bd.pinned_tag(repo) == "v0.2.0" and bd.locked_sha(repo) == new_sha
+    bd.changelog(repo, "v0.2.0")
+    assert "require `0.2`" in (repo / "crates/lib/CHANGELOG.md").read_text()
+
+
 # ---- canary --------------------------------------------------------------
 
 
@@ -195,6 +224,47 @@ def test_canary_takes_every_decdn_crate_from_main(tmp_path):
         name: {"git": GIT, "branch": "main"} for name in PATCHED
     }
     assert root["profile"]["release"] == {"lto": "fat"}
+
+
+def test_canary_moves_a_version_on_the_git_alias(tmp_path):
+    repo = build(tmp_path, ref='tag = "v0.0.1", version = "0.0.1"')
+    bd.canary(repo, "0.2.0")
+    _, git, _ = bd.decdn_deps(bd.manifest(repo))
+    assert git == {"decdn-e2e": {"git": GIT, "branch": "main", "version": "0.2.0"}}
+
+
+def main_lock(repo: Path, extra: str = "") -> None:
+    """The lock `cargo update` writes after `canary`: every decdn crate from main."""
+    lock = ["version = 4"]
+    for name in (*PATCHED, "decdn-e2e"):
+        lock += ["", "[[package]]", f'name = "{name}"', 'version = "0.2.0"',
+                 f'source = "git+{GIT}?branch=main#{SHA}"']
+    (repo / "Cargo.lock").write_text("\n".join(lock) + "\n" + extra)
+
+
+def test_canary_check_passes_when_everything_is_on_main(tmp_path):
+    repo = build(tmp_path)
+    main_lock(repo)
+    assert bd.canary_check(repo) == []
+
+
+@pytest.mark.parametrize(("extra", "problem"), [
+    (f'\n[[package]]\nname = "decdn-protocol"\nversion = "0.1.0"\nsource = "{CRATES_IO}"\n',
+     "decdn-protocol 0.1.0 from crates.io"),
+    ('\n[[patch.unused]]\nname = "decdn-protocol"\nversion = "0.3.0"\n',
+     "[patch] decdn-protocol 0.3.0 unused"),
+    (f'\n[[package]]\nname = "decdn-e2e"\nversion = "0.1.0"\nsource = "git+{GIT}?tag=v0.1.0#{SHA}"\n',
+     "decdn-e2e from git+"),
+])
+def test_canary_check_names_what_stayed_off_main(tmp_path, extra, problem):
+    repo = build(tmp_path)
+    main_lock(repo, extra)
+    assert any(problem in p for p in bd.canary_check(repo)), bd.canary_check(repo)
+
+
+def test_canary_check_on_the_release_lock_fails(tmp_path):
+    problems = bd.canary_check(build(tmp_path))
+    assert any("from crates.io" in p for p in problems), problems
 
 
 def test_canary_refuses_a_second_crates_io_patch(tmp_path):
@@ -413,6 +483,15 @@ def test_compare_orders_by_semver(tmp_path, pinned, tag, relation):
     assert bd.compare(repo, tag) == relation
 
 
+def test_compare_refuses_a_locked_version_it_cannot_read(tmp_path):
+    # Not "untagged": that would let any tag, even an older one, move the pin.
+    repo = build(tmp_path)
+    lock = repo / "Cargo.lock"
+    lock.write_text(lock.read_text().replace('version = "0.0.1"', 'version = "0.0.1+build"'))
+    with pytest.raises(bd.BumpError):
+        bd.compare(repo, "v0.1.0")
+
+
 def test_compare_with_mixed_versions_is_untagged(tmp_path):
     repo = build(tmp_path)
     lock = repo / "Cargo.lock"
@@ -474,3 +553,29 @@ def test_main_compare_prints_the_relation(cli_repo, capsys, tag, out):
 def test_main_locked_crates_prints_one_per_line(cli_repo, capsys):
     assert bd.main(["locked-crates"]) == 0
     assert capsys.readouterr().out.split() == bd.locked_crates(cli_repo)
+
+
+def test_main_pinned_prints_an_empty_line_for_mixed_versions(cli_repo, capsys):
+    # open-decdn-bump.sh reads an empty `pinned` as "untagged"; it dies on a
+    # non-zero exit.
+    lock = cli_repo / "Cargo.lock"
+    lock.write_text(lock.read_text().replace('version = "0.0.1"', 'version = "0.0.2"', 1))
+    assert bd.main(["pinned"]) == 0
+    assert capsys.readouterr().out == "\n"
+
+
+@pytest.mark.parametrize(("argv", "req"), [(["rewrite", "v0.2.0"], "0.2"),
+                                          (["rewrite", "v0.2.0", "--exact"], "=0.2.0")])
+def test_main_rewrite(cli_repo, capsys, argv, req):
+    assert bd.main(argv) == 0
+    assert requirements(cli_repo) == {req}
+
+
+@pytest.mark.parametrize("argv", [["rewrite", "v0.2.0", "--bogus"], ["canary-check", "x"]])
+def test_main_rewrite_and_canary_check_usage(cli_repo, capsys, argv):
+    assert bd.main(argv) == 2
+
+
+def test_main_canary_check_exits_1_off_main(cli_repo, capsys):
+    assert bd.main(["canary-check"]) == 1
+    assert "not on decdn main" in capsys.readouterr().err

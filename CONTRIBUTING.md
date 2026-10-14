@@ -90,8 +90,10 @@ decdn-e2e = { path = "../decdn/crates/e2e" }
 
 With nothing left on git, cargo warns that the `Cargo.toml` `[patch]` entries
 were not used; that is expected. The override rewrites those packages'
-sources in `Cargo.lock`; don't commit that. Delete the file and run
-`cargo metadata` to get the pinned lock back.
+sources in `Cargo.lock`; don't commit that (`check-decdn-pin.sh` refuses
+it). Delete the file and run `git checkout -- Cargo.lock` to get the pinned
+lock back: `cargo metadata` alone would re-resolve to crates.io's newest
+release in the range.
 
 ## Pull requests
 

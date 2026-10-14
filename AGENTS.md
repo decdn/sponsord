@@ -122,8 +122,8 @@ rather than writing new ones.
   requirement (`"0.1"`), and `Cargo.lock` decides which release gets built.
   `decdn-e2e` (the anvil fixtures, unpublished) is the one git dependency:
   dev-only, at the release tag of the locked version, with a
-  `[patch."https://github.com/decdn/decdn"]` that takes its decdn
-  dependencies from crates.io so no crate builds twice
+  `[patch."https://github.com/decdn/decdn"]` that takes the decdn crates it
+  shares with them from crates.io so none builds twice
   (`check-decdn-pin.sh` checks all of it). Move the lock in a PR of its own
   (`RELEASING.md` § Pinning decdn): `scripts/open-decdn-bump.sh` opens that
   PR, and decdn's `publish-crates.sh` runs it for each release. To build

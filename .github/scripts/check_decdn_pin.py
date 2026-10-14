@@ -4,9 +4,10 @@
 The decdn crates come from crates.io, at a caret requirement, and Cargo.lock
 decides which release builds. decdn-e2e, the anvil fixture, is the exception:
 decdn does not publish it, so it is a git dependency on github.com/decdn/decdn
-at a release tag, used only as a dev-dependency. Its own decdn dependencies
-are folded back onto crates.io by a [patch] on that repository, so that each
-decdn crate is built once:
+at a release tag, used only as a dev-dependency. The decdn crates it shares
+with the crates.io dependencies (decdn-client and what it pulls in) are
+folded back onto crates.io by a [patch] on that repository, so that each is
+built once; the ones only it uses (decdn-node, ...) stay on git:
 
     [workspace.dependencies]      decdn-x = "0.1"           (crates.io)
                                   decdn-e2e = { git, tag }  (dev-only)
@@ -17,16 +18,20 @@ decdn crate is built once:
 Checked here:
 
 * At least one decdn dependency comes from crates.io, all at one plain caret
-  requirement (`X`, `X.Y` or `X.Y.Z[-pre]`), and none is a leftover path into
-  a sibling checkout. A decdn git dependency is used only as a
-  dev-dependency, and names decdn's `v<version>` tag for the crates.io
-  version Cargo.lock holds: its contracts must match the ABI those crates
-  were built from.
+  requirement (`X`, `X.Y` or `X.Y.Z[-pre]`): the caret range of the version
+  Cargo.lock holds. None is a leftover path into a sibling checkout, and
+  members take every decdn crate from [workspace.dependencies]
+  (`workspace = true`), so nothing here escapes these checks; every member
+  listed has a Cargo.toml (globs are not expanded).
+* A decdn git dependency is used only as a dev-dependency, and names decdn's
+  `v<version>` tag for the crates.io version Cargo.lock holds: its contracts
+  must match the ABI those crates were built from.
 * Every [patch] entry on the decdn repository is a crates.io requirement equal
-  to the one above. Cargo.lock locks every crates.io decdn crate at one
-  version, no decdn crate from both git and crates.io (a [patch] entry is
-  missing), every git decdn crate at one commit, and records no unused
-  [patch] entry.
+  to the one above. Cargo.lock locks every crates.io decdn dependency from
+  crates.io, all at one version; no decdn crate from both git and crates.io
+  (a [patch] entry is missing) or from a path (a local override); every git
+  decdn crate at one commit, which a [workspace.dependencies] git alias
+  names; and records no unused [patch] entry.
 
 Run: .github/scripts/check-decdn-pin.sh
 """
@@ -132,6 +137,38 @@ def member_uses(repo_root: Path, manifest: dict) -> dict[str, set[str]]:
     return uses
 
 
+def member_errors(repo_root: Path, manifest: dict) -> list[str]:
+    """Members that are missing, or declare a decdn crate themselves.
+
+    A member's own `decdn-x = { git = … }` or `{ path = … }` would escape
+    every check on [workspace.dependencies]; so would a member path that does
+    not resolve (a glob), which member_uses() cannot read.
+    """
+    errors: list[str] = []
+    for rel in manifest.get("workspace", {}).get("members", []):
+        path = repo_root / rel / "Cargo.toml"
+        if not path.is_file():
+            errors.append(
+                f"Cargo.toml: workspace member {rel!r} has no Cargo.toml — list members "
+                "one by one (this check does not expand globs)"
+            )
+            continue
+        member = tomllib.loads(path.read_text())
+        tables = [member.get(t, {}) for t in DEP_TABLES]
+        for target in member.get("target", {}).values():
+            tables.extend(target.get(t, {}) for t in DEP_TABLES)
+        for deps in tables:
+            for key, spec in deps.items():
+                package = spec.get("package", key) if isinstance(spec, dict) else key
+                inherited = isinstance(spec, dict) and spec.get("workspace") is True
+                if str(package).startswith("decdn-") and not inherited:
+                    errors.append(
+                        f"{rel}/Cargo.toml: {key} declares decdn's {package} itself — take "
+                        "it from [workspace.dependencies] (`workspace = true`)"
+                    )
+    return errors
+
+
 def locked_decdn(lock: dict) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """({name: versions} from crates.io, {name: commits} from the decdn repo).
 
@@ -182,6 +219,7 @@ def check(repo_root: Path) -> tuple[list[str], list[str]]:
             )
     req = min(reqs)
 
+    errors += member_errors(repo_root, manifest)
     uses = member_uses(repo_root, manifest)
     for name, spec in sorted(git.items()):
         kept = uses.get(name, set()) - {"dev-dependencies"}
@@ -223,7 +261,19 @@ def check(repo_root: Path) -> tuple[list[str], list[str]]:
             f"Cargo.lock: {name} is locked from both crates.io and {DECDN_GIT}, so it "
             f"builds twice — add it to [patch.\"{DECDN_GIT}\"]"
         )
+    for package in lock.get("package", []):
+        name = str(package.get("name", ""))
+        if name.startswith("decdn-") and "source" not in package:
+            errors.append(
+                f"Cargo.lock: {name} is locked from a local path — a `[patch]` override "
+                "(CONTRIBUTING.md) leaked into the lock; `git checkout -- Cargo.lock`"
+            )
     shas = flatten(commits)
+    if shas and not git:
+        errors.append(
+            f"Cargo.lock: decdn git crates ({', '.join(sorted(commits))}) but no "
+            "[workspace.dependencies] git alias names their tag"
+        )
     if len(shas) > 1:
         errors.append(
             f"Cargo.lock: decdn is locked at {len(shas)} commits "

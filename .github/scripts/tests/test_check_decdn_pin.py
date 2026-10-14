@@ -239,3 +239,63 @@ def test_caret_of_a_version():
 
 def test_the_real_repository_passes():
     assert errors(REPO_ROOT) == []
+
+
+# ---- what escapes [workspace.dependencies] -------------------------------
+
+
+def test_member_declaring_a_decdn_git_dependency_itself_is_an_error(tmp_path):
+    repo = build(tmp_path, member_deps="[dependencies]\ndecdn-client.workspace = true\n"
+                 f'[dev-dependencies]\ndecdn-e2e = {{ git = "{GIT}", branch = "main" }}\n')
+    errs = errors(repo)
+    assert any("crates/app/Cargo.toml" in e and "decdn-e2e" in e for e in errs), errs
+
+
+def test_member_renaming_a_decdn_crate_is_an_error(tmp_path):
+    repo = build(tmp_path, member_deps="[dependencies]\ndecdn-client.workspace = true\n"
+                 'proto = { package = "decdn-protocol", version = "0.1" }\n')
+    errs = errors(repo)
+    assert len(errs) == 1 and "proto" in errs[0] and "decdn-protocol" in errs[0], errs
+
+
+def test_member_path_that_does_not_resolve_is_an_error(tmp_path):
+    repo = build(tmp_path)
+    manifest = repo / "Cargo.toml"
+    manifest.write_text(manifest.read_text().replace('members = ["crates/app"]',
+                                                     'members = ["crates/*"]'))
+    errs = errors(repo)
+    assert any("crates/*" in e and "globs" in e for e in errs), errs
+
+
+def test_decdn_crate_locked_from_a_path_is_an_error(tmp_path):
+    # What CONTRIBUTING.md's local override leaves in the lock.
+    repo = build(tmp_path)
+    lock = repo / "Cargo.lock"
+    lock.write_text(lock.read_text() + '\n[[package]]\nname = "decdn-config-types"\n'
+                    'version = "0.1.0"\n')
+    errs = errors(repo)
+    assert len(errs) == 1 and "decdn-config-types" in errs[0] and "path" in errs[0], errs
+
+
+def test_git_crates_without_a_git_alias_are_an_error(tmp_path):
+    repo = build(tmp_path, git={}, member_deps="[dependencies]\ndecdn-client.workspace = true\n")
+    errs = errors(repo)
+    assert len(errs) == 1 and "no [workspace.dependencies] git alias" in errs[0], errs
+
+
+# ---- command line --------------------------------------------------------
+# open-decdn-bump.sh and the pre-commit hook branch on the exit code.
+
+
+def test_main_exits_0_when_consistent_and_1_when_not(tmp_path, monkeypatch, capsys):
+    import subprocess
+
+    repo = build(tmp_path)
+    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    monkeypatch.chdir(repo)
+    assert cdp.main([]) == 0
+    assert "decdn pin OK" in capsys.readouterr().out
+    lock = repo / "Cargo.lock"
+    lock.write_text(lock.read_text().replace('version = "0.1.0"', 'version = "0.1.1"', 1))
+    assert cdp.main([]) == 1
+    assert "inconsistent" in capsys.readouterr().err

@@ -19,8 +19,12 @@ rest, one subcommand per step:
     ready <tag>       exit 0 when crates.io serves every decdn crate the
                       workspace takes from it at <tag>, 3 while it answers
                       that one is missing (index lag), 1 when it cannot answer
-    rewrite <tag>     point decdn-e2e at <tag>, and the crates.io
-                      requirements at its caret range
+    rewrite <tag> [--exact]
+                      point decdn-e2e at <tag>, and the crates.io
+                      requirements at its caret range; with --exact, at
+                      `=<version>` instead, so that `cargo update` locks
+                      exactly that release (the bump then rewrites again
+                      without it)
     changelog <tag>   add the bump entry under [Unreleased], naming the
                       commit Cargo.lock pins decdn-e2e at
     locked-sha        the decdn commit Cargo.lock pins decdn-e2e at
@@ -30,6 +34,8 @@ rest, one subcommand per step:
                       workspace version is <version> (ci.yml's decdn main
                       canary): every decdn crate from git `main`, through a
                       [patch.crates-io]
+    canary-check      after `canary` and `cargo update`: fail unless every
+                      decdn crate in Cargo.lock comes from git `main`
 
 Run: .github/scripts/bump-decdn.sh <subcommand> [args]
 """
@@ -128,12 +134,9 @@ def compare(repo_root: Path, tag: str) -> str:
     """Where the pin stands against <tag>: same, behind, ahead or untagged."""
     target = semver_key(version_of(tag))
     pinned = pinned_tag(repo_root)
-    try:
-        current = semver_key(version_of(pinned)) if pinned else None
-    except BumpError:
-        current = None
-    if current is None:
+    if pinned is None:
         return "untagged"
+    current = semver_key(version_of(pinned))
     if current == target:
         return "same"
     return "behind" if current < target else "ahead"
@@ -158,7 +161,8 @@ def latest() -> str:
         raise BumpError(f"GET {RELEASES_API}: HTTP {status}")
     release = json.loads(body)
     # /releases/latest never returns a draft or a prerelease; checked anyway,
-    # because pinning one would ship a lock that cannot go to crates.io.
+    # because a draft is not on crates.io, and a prerelease would make the
+    # caret requirement a prerelease pin.
     if release.get("draft") or release.get("prerelease"):
         raise BumpError(f"{RELEASES_API} returned a draft or prerelease")
     tag = str(release.get("tag_name", ""))
@@ -223,15 +227,18 @@ def set_requirement(line: str, req: str) -> str:
     return line
 
 
-def rewrite(repo_root: Path, tag: str) -> list[str]:
+def rewrite(repo_root: Path, tag: str, *, exact: bool = False) -> list[str]:
     """Point decdn-e2e at <tag> and the requirements at its caret range.
 
-    Returns the names of the git aliases moved. The requirements change only
-    when <tag> leaves their range (0.1 -> 0.2): within it, `cargo update`
-    alone moves the lock.
+    Returns the names of the git aliases moved. The caret requirements change
+    only when <tag> leaves their range (0.1 -> 0.2). With <exact>, they become
+    `=<version>`: cargo allows one release per caret range and source, so
+    `cargo update` then moves every decdn crate to exactly <version>, not to
+    crates.io's newest; the bump rewrites again without <exact> afterwards,
+    and the lock still satisfies the caret requirements.
     """
     version = version_of(tag)
-    req = caret(version)
+    req = f"={version}" if exact else caret(version)
     moved: list[str] = []
 
     def edit(header: str, line: str) -> str:
@@ -298,7 +305,8 @@ def canary(repo_root: Path, version: str) -> list[str]:
         if header != "workspace.dependencies":
             return line
         if GIT_LINE.match(line):
-            return REF_FIELD.sub('branch = "main"', line)
+            line = REF_FIELD.sub('branch = "main"', line)
+            return VERSION_FIELD.sub(f'version = "{version}"', line)
         return set_requirement(line, req)
 
     edit_lines(repo_root, edit)
@@ -313,11 +321,38 @@ def canary(repo_root: Path, version: str) -> list[str]:
     if (
         decdn_patch(root)
         or any(r != req for r in registry.values())
-        or any(spec.get("branch") != "main" for spec in git.values())
+        or any(
+            spec.get("branch") != "main" or spec.get("version", version) != version
+            for spec in git.values()
+        )
         or sorted(patched) != names
     ):
         raise BumpError(f"Cargo.toml: could not move every decdn crate to main ({version})")
     return names
+
+
+def canary_check(repo_root: Path) -> list[str]:
+    """What in Cargo.lock still does not come from decdn `main`; empty when all does.
+
+    A [patch.crates-io] entry whose version does not match main's leaves its
+    crate on crates.io, and cargo only warns: the canary would test the
+    release, not main, and stay green.
+    """
+    data = lock(repo_root)
+    registry, git = locked_decdn(data)
+    problems = [f"{n} {v} from crates.io" for n, vs in sorted(registry.items()) for v in sorted(vs)]
+    problems += [
+        f"[patch] {p.get('name')} {p.get('version')} unused"
+        for p in data.get("patch", {}).get("unused", [])
+        if str(p.get("name", "")).startswith("decdn-")
+    ]
+    for package in data.get("package", []):
+        source = str(package.get("source", ""))
+        if package.get("name") in git and "branch=main#" not in source:
+            problems.append(f"{package['name']} from {source}")
+    if not git:
+        problems.append("no decdn crate from git main")
+    return problems
 
 
 def locked_sha(repo_root: Path) -> str:
@@ -470,9 +505,11 @@ def main(argv: list[str]) -> int:
                     print(f"  {m}", file=sys.stderr)
                 return NOT_READY
             print(f"crates.io serves every decdn crate at {args[0]}")
-        elif command == "rewrite" and len(args) == 1:
-            names = rewrite(repo_root, args[0])
-            print(f"pinned the decdn crates to {caret(version_of(args[0]))}, {', '.join(names) or 'no git alias'} to {args[0]}")
+        elif command == "rewrite" and args and args[1:] in ([], ["--exact"]):
+            exact = args[1:] == ["--exact"]
+            names = rewrite(repo_root, args[0], exact=exact)
+            req = f"={version_of(args[0])}" if exact else caret(version_of(args[0]))
+            print(f"pinned the decdn crates to {req}, {', '.join(names) or 'no git alias'} to {args[0]}")
         elif command == "changelog" and len(args) == 1:
             for path in changelog(repo_root, args[0]):
                 print(f"updated {path.relative_to(repo_root)}")
@@ -485,6 +522,14 @@ def main(argv: list[str]) -> int:
         elif command == "canary" and len(args) == 1:
             names = canary(repo_root, args[0])
             print(f"took {', '.join(names)} from decdn main ({args[0]})")
+        elif command == "canary-check" and not args:
+            problems = canary_check(repo_root)
+            if problems:
+                print("the lock is not on decdn main:", file=sys.stderr)
+                for p in problems:
+                    print(f"  {p}", file=sys.stderr)
+                return 1
+            print("every decdn crate comes from decdn main")
         else:
             print(__doc__, file=sys.stderr)
             return 2

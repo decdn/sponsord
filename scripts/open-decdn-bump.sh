@@ -99,7 +99,8 @@ if [[ -z "$TAG" ]]; then
   TAG=$(bump latest) || die "could not read decdn's latest release"
 fi
 # Never move the pin backwards: not to a patch release on an older line, nor
-# to an older tag given by hand. A pin off a tag (untagged) always moves.
+# to an older tag given by hand. A lock with no single crates.io decdn release
+# (untagged) always moves.
 relation=$(bump compare "$TAG") || die "could not compare the pin with $TAG"
 case "$relation" in
   same)
@@ -138,17 +139,35 @@ done
 
 # ---- bump ----------------------------------------------------------------
 
-echo "==> Pinning decdn $TAG (from ${CURRENT:-a non-tag ref})"
+echo "==> Pinning decdn $TAG (from ${CURRENT:-no single locked release})"
 OLD_SHA=$(bump locked-sha) || die "could not read the locked decdn commit"
-bump rewrite "$TAG" || die "could not point the decdn dependencies at $TAG; no PR opened"
+# `=<version>` for the update, so every decdn crate moves to exactly $TAG and
+# not to crates.io's newest in the range; the caret requirements come back
+# after it, and the lock satisfies them.
+bump rewrite "$TAG" --exact || die "could not point the decdn dependencies at $TAG; no PR opened"
 # Every decdn crate the lock holds, so that none stays behind on the old
-# release. Within the caret range this takes crates.io's newest, which is $TAG
-# unless a later release is already out; check-decdn-pin.sh below catches that.
+# release.
 crates=$(bump locked-crates) || die "could not list the locked decdn crates; no PR opened"
 [[ -n "$crates" ]] || die "Cargo.lock holds no decdn crate; no PR opened"
 mapfile -t CRATES <<<"$crates"
-cargo update --quiet "${CRATES[@]/#/--package=}" ||
-  die "cargo update to decdn $TAG failed; no PR opened"
+# The API `ready` asks can answer before the index cargo reads serves the
+# release; cargo then cannot select it. Wait that out like `ready`, and treat
+# any other failure as an error.
+attempt=1
+until out=$(cargo update --quiet "${CRATES[@]/#/--package=}" 2>&1); do
+  if ! grep -qE 'failed to select a version|patch .decdn-[a-z0-9-]+. version mismatch' <<<"$out"; then
+    printf '%s\n' "$out" >&2
+    die "cargo update to decdn $TAG failed; no PR opened"
+  fi
+  if (( attempt >= READY_ATTEMPTS )); then
+    echo "the crates.io index does not serve decdn $TAG yet; run this again later" >&2
+    exit 3
+  fi
+  echo "    waiting ${READY_INTERVAL}s for the crates.io index (attempt $attempt/$READY_ATTEMPTS)" >&2
+  sleep "$READY_INTERVAL"
+  attempt=$((attempt + 1))
+done
+bump rewrite "$TAG" || die "could not restore the caret requirements; no PR opened"
 bump changelog "$TAG" || die "could not add the changelog entries; no PR opened"
 NEW_SHA=$(bump locked-sha) || die "could not read the new locked decdn commit"
 
@@ -194,7 +213,7 @@ BODY=$(mktemp)
 {
   echo "Moves the decdn pin to [decdn ${TAG}](https://github.com/${DECDN}/releases/tag/${TAG})."
   echo
-  echo "- From: \`${CURRENT:-(not a tag)}\` (\`${OLD_SHA}\`)"
+  echo "- From: \`${CURRENT:-(no single release)}\` (\`${OLD_SHA}\`)"
   echo "- To: \`${TAG}\` from crates.io; decdn-e2e at \`${NEW_SHA}\`"
   echo "- decdn changes: https://github.com/${DECDN}/compare/${OLD_SHA}...${NEW_SHA}"
   echo
