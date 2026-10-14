@@ -132,18 +132,27 @@ def member_uses(repo_root: Path, manifest: dict) -> dict[str, set[str]]:
     return uses
 
 
-def locked_decdn(lock: dict) -> tuple[dict[str, str], dict[str, str]]:
-    """({name: version} from crates.io, {name: commit} from the decdn repo)."""
-    registry: dict[str, str] = {}
-    git: dict[str, str] = {}
+def locked_decdn(lock: dict) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """({name: versions} from crates.io, {name: commits} from the decdn repo).
+
+    Sets, because a lock may hold one name more than once (0.1.x beside
+    0.2.x, or two commits), and a check must see every entry.
+    """
+    registry: dict[str, set[str]] = {}
+    git: dict[str, set[str]] = {}
     for package in lock.get("package", []):
         name = str(package.get("name", ""))
         source = str(package.get("source", ""))
         if source == CRATES_IO and name.startswith("decdn-"):
-            registry[name] = str(package.get("version", ""))
+            registry.setdefault(name, set()).add(str(package.get("version", "")))
         elif (match := LOCK_SOURCE.match(source)) and is_decdn_git(match["url"]):
-            git[name] = match["sha"]
+            git.setdefault(name, set()).add(match["sha"])
     return registry, git
+
+
+def flatten(locked: dict[str, set[str]]) -> set[str]:
+    """Every version (or commit) in a locked_decdn() map."""
+    return set().union(*locked.values())
 
 
 def check(repo_root: Path) -> tuple[list[str], list[str]]:
@@ -199,11 +208,11 @@ def check(repo_root: Path) -> tuple[list[str], list[str]]:
     lock = tomllib.loads(lock_path.read_text())
     locked, commits = locked_decdn(lock)
 
-    versions = set(locked.values())
+    versions = flatten(locked)
     if len(versions) > 1:
         errors.append(
             "Cargo.lock: the crates.io decdn crates are at different versions: "
-            + ", ".join(f"{n} {v}" for n, v in sorted(locked.items()))
+            + ", ".join(f"{n} {v}" for n, vs in sorted(locked.items()) for v in sorted(vs))
             + " — `cargo update` them together"
         )
     for name in sorted(registry):
@@ -214,10 +223,11 @@ def check(repo_root: Path) -> tuple[list[str], list[str]]:
             f"Cargo.lock: {name} is locked from both crates.io and {DECDN_GIT}, so it "
             f"builds twice — add it to [patch.\"{DECDN_GIT}\"]"
         )
-    if len(set(commits.values())) > 1:
+    shas = flatten(commits)
+    if len(shas) > 1:
         errors.append(
-            f"Cargo.lock: decdn is locked at {len(set(commits.values()))} commits "
-            f"({', '.join(sorted(set(commits.values())))}) — move every git alias to one tag"
+            f"Cargo.lock: decdn is locked at {len(shas)} commits "
+            f"({', '.join(sorted(shas))}) — move every git alias to one tag"
         )
     unused = [p for p in lock.get("patch", {}).get("unused", []) if str(p.get("name", "")).startswith("decdn-")]
     for package in unused:
@@ -229,6 +239,12 @@ def check(repo_root: Path) -> tuple[list[str], list[str]]:
 
     if len(versions) == 1:
         version = next(iter(versions))
+        if len(reqs) == 1 and req != caret(version):
+            errors.append(
+                f"Cargo.toml: the decdn crates require {req!r} but Cargo.lock holds "
+                f"{version} — set every decdn-* requirement, and the [patch], to "
+                f"{caret(version)!r} (`bump-decdn.sh rewrite v{version}`)"
+            )
         for name, spec in sorted(git.items()):
             if "tag" in spec and spec["tag"] != f"v{version}":
                 errors.append(
@@ -242,7 +258,7 @@ def check(repo_root: Path) -> tuple[list[str], list[str]]:
                 tags = sorted({spec["tag"] for spec in git.values()})
                 notes.append(
                     f"{', '.join(sorted(git))} at {', '.join(tags)}, "
-                    f"decdn@{next(iter(commits.values()))}"
+                    f"decdn@{next(iter(shas))}"
                 )
     return errors, notes
 

@@ -12,6 +12,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MODULE_PATH = REPO_ROOT / ".github/scripts/check_decdn_pin.py"
 
@@ -152,6 +154,36 @@ def test_crates_io_versions_disagreeing_is_an_error(tmp_path):
     repo = build(tmp_path, locked={"decdn-client": "0.1.1", "decdn-incentive": "0.1.0",
                                    "decdn-protocol": "0.1.1"})
     assert any("different versions" in e for e in errors(repo))
+
+
+def add_package(repo: Path, name: str, version: str, source: str) -> None:
+    lock = repo / "Cargo.lock"
+    lock.write_text(lock.read_text() + f'\n[[package]]\nname = "{name}"\n'
+                    f'version = "{version}"\nsource = "{source}"\n')
+
+
+def test_a_second_crates_io_copy_of_a_crate_is_an_error(tmp_path):
+    # Cargo keeps 0.1.x and 0.2.x side by side; the second entry must not
+    # replace the first.
+    repo = build(tmp_path)
+    add_package(repo, "decdn-client", "0.2.0", CRATES_IO)
+    errs = errors(repo)
+    assert any("decdn-client 0.1.0" in e and "decdn-client 0.2.0" in e for e in errs), errs
+
+
+def test_a_second_commit_of_a_git_crate_is_an_error(tmp_path):
+    repo = build(tmp_path, locked_git={"decdn-e2e": SHA})
+    add_package(repo, "decdn-e2e", "0.1.0", f"git+{GIT}?branch=main#{OTHER_SHA}")
+    errs = errors(repo)
+    assert len(errs) == 1 and "2 commits" in errs[0], errs
+
+
+@pytest.mark.parametrize("req", ["0.2", "0.1.3", "0"])
+def test_requirement_off_the_locked_version_is_an_error(tmp_path, req):
+    repo = build(tmp_path, registry={"decdn-client": req, "decdn-incentive": req},
+                 patch={n: req for n in DEFAULT_PATCH})
+    errs = errors(repo)
+    assert len(errs) == 1 and f"require {req!r}" in errs[0] and "'0.1'" in errs[0], errs
 
 
 def test_dependency_missing_from_the_lock_is_an_error(tmp_path):

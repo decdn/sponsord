@@ -59,6 +59,7 @@ from check_decdn_pin import (  # noqa: E402
     caret,
     decdn_deps,
     decdn_patch,
+    flatten,
     is_decdn_git,
     locked_decdn,
     requirement,
@@ -117,7 +118,7 @@ def lock(repo_root: Path) -> dict:
 
 def pinned_tag(repo_root: Path) -> str | None:
     """v<the crates.io decdn version Cargo.lock holds>, or None for none or several."""
-    versions = set(locked_decdn(lock(repo_root))[0].values())
+    versions = flatten(locked_decdn(lock(repo_root))[0])
     if len(versions) == 1:
         return f"v{next(iter(versions))}"
     return None
@@ -321,7 +322,7 @@ def canary(repo_root: Path, version: str) -> list[str]:
 
 def locked_sha(repo_root: Path) -> str:
     """The one decdn commit Cargo.lock pins decdn-e2e and its git crates at."""
-    commits = set(locked_decdn(lock(repo_root))[1].values())
+    commits = flatten(locked_decdn(lock(repo_root))[1])
     if len(commits) != 1:
         raise BumpError(f"Cargo.lock pins decdn at {len(commits)} commits, expected one")
     return next(iter(commits))
@@ -356,8 +357,8 @@ def entry(tag: str, sha: str) -> str:
     version = version_of(tag)
     text = (
         f"**decdn {tag}.** The decdn crates are locked at `{version}` from crates.io "
-        f"and require `{caret(version)}`; the anvil fixtures at decdn's `{tag}` "
-        f"release tag (`{sha}`)."
+        f"and require `{caret(version)}`, and the anvil fixtures are at decdn's "
+        f"`{tag}` release tag (`{sha}`)."
     )
     return textwrap.fill(
         text,
@@ -411,9 +412,13 @@ def add_entry(changelog: str, tag: str, sha: str) -> str:
     bullet = entry(tag, sha).splitlines()
     changed = next((i for i in range(start + 1, end) if lines[i] == "### Changed"), None)
     if changed is not None:
-        insert_at, block = changed + 2, [*bullet, ""]
+        insert_at = changed + 2
         if insert_at > len(lines) or lines[insert_at - 1] != "":
             raise BumpError(f"expected a blank line after line {insert_at - 1}")
+        # Joins the list a bullet already opens, without a blank line that
+        # would split it.
+        joins = insert_at < len(lines) and lines[insert_at].startswith("- ")
+        block = bullet if joins else [*bullet, ""]
     else:
         insert_at = next(
             (i for i in range(start + 1, end) if lines[i] in AFTER_CHANGED),

@@ -228,7 +228,7 @@ def test_changelog_entry_opens_a_changed_section(tmp_path):
     assert text.startswith(
         "# Changelog\n\n## [Unreleased]\n\n### Changed\n\n"
         "- **decdn v0.0.1.** The decdn crates are locked at `0.0.1` from crates.io and\n"
-        "  require `0.0.1`; the anvil fixtures at decdn's `v0.0.1` release tag\n"
+        "  require `0.0.1`, and the anvil fixtures are at decdn's `v0.0.1` release tag\n"
         f"  (`{SHA}`).\n\n## [0.0.1] - 2026-10-09\n"
     )
     assert all(len(line) <= 80 for line in text.splitlines())
@@ -242,6 +242,8 @@ def test_changelog_entry_joins_an_existing_changed_section(tmp_path):
     assert out.count("### Changed") == 1
     unreleased = out.split("## [0.0.1]")[0]
     assert unreleased.index("**decdn v0.1.0.**") < unreleased.index("- Earlier change.")
+    # One list: no blank line between the new bullet and the old one.
+    assert f"(`{SHA}`).\n- Earlier change.\n" in unreleased
 
 
 def test_changelog_ignores_a_changed_heading_of_an_older_release(tmp_path):
