@@ -434,29 +434,52 @@ def test_latest_refuses_anything_but_a_published_release(monkeypatch, response):
         bd.latest()
 
 
-def crate_url(name: str, version: str = "0.1.0") -> str:
-    return f"{bd.CRATES_API}/{name}/{version}"
+def crate_url(name: str) -> str:
+    return bd.index_url(name)
+
+
+def index_file(*versions: str) -> tuple[int, bytes]:
+    """A sparse-index answer listing <versions>, one JSON line each."""
+    lines = [json.dumps({"name": "x", "vers": v, "deps": [], "yanked": False}) for v in versions]
+    return 200, "\n".join(lines).encode() + b"\n"
 
 
 def served(**overrides) -> dict[str, object]:
-    """crates.io answering 200 for every crate the workspace takes from it."""
-    return {crate_url(n): overrides.get(n.replace("-", "_"), (200, b"")) for n in PATCHED}
+    """The index listing 0.1.0 for every crate the workspace takes from crates.io."""
+    return {
+        crate_url(n): overrides.get(n.replace("-", "_"), index_file("0.0.1", "0.1.0"))
+        for n in PATCHED
+    }
 
 
-def test_ready_when_crates_io_serves_every_crate(tmp_path, monkeypatch):
+def test_index_url_follows_the_crates_io_layout():
+    assert bd.index_url("decdn-client") == "https://index.crates.io/de/cd/decdn-client"
+    assert bd.index_url("abc") == "https://index.crates.io/3/a/abc"
+    assert bd.index_url("ab") == "https://index.crates.io/2/ab"
+
+
+def test_ready_when_the_index_lists_every_crate(tmp_path, monkeypatch):
     # decdn-e2e is never published; it is not asked for. decdn-protocol is
     # only in the [patch], and is.
     stub_fetch(monkeypatch, served())
     assert bd.ready(build(tmp_path), "v0.1.0") == []
 
 
-def test_not_ready_while_crates_io_has_no_such_version(tmp_path, monkeypatch):
-    stub_fetch(monkeypatch, served(decdn_protocol=(404, b"")))
+@pytest.mark.parametrize("response", [index_file("0.0.1"), (404, b"")])
+def test_not_ready_while_the_index_lacks_the_version(tmp_path, monkeypatch, response):
+    # The crates.io API may already serve it; cargo reads the index.
+    stub_fetch(monkeypatch, served(decdn_protocol=response))
     assert bd.ready(build(tmp_path), "v0.1.0") == ["decdn-protocol 0.1.0"]
 
 
+def test_ready_fails_on_an_answer_that_is_not_an_index_file(tmp_path, monkeypatch):
+    stub_fetch(monkeypatch, served(decdn_client=(200, b"<html>")))
+    with pytest.raises(bd.BumpError, match="not an index file"):
+        bd.ready(build(tmp_path), "v0.1.0")
+
+
 @pytest.mark.parametrize("response", [OSError("timed out"), (503, b""), (429, b"")])
-def test_ready_fails_when_crates_io_cannot_answer(tmp_path, monkeypatch, response):
+def test_ready_fails_when_the_index_cannot_answer(tmp_path, monkeypatch, response):
     # Index lag is a 404 and worth waiting out; anything else is not lag, and
     # "run it again later" would hide it.
     stub_fetch(monkeypatch, served(decdn_client=response))
@@ -517,7 +540,7 @@ def test_main_ready_exits_0_when_served(cli_repo, monkeypatch, capsys):
 
 
 def test_main_ready_exits_3_while_not_served(cli_repo, monkeypatch, capsys):
-    stub_fetch(monkeypatch, served(decdn_client=(404, b"")))
+    stub_fetch(monkeypatch, served(decdn_client=index_file("0.0.1")))
     assert bd.main(["ready", "v0.1.0"]) == bd.NOT_READY == 3
 
 

@@ -16,9 +16,10 @@ rest, one subcommand per step:
     compare <tag>     where the pin stands against <tag>, by SemVer
                       precedence: same, behind, ahead, or untagged when
                       `pinned` is empty
-    ready <tag>       exit 0 when crates.io serves every decdn crate the
-                      workspace takes from it at <tag>, 3 while it answers
-                      that one is missing (index lag), 1 when it cannot answer
+    ready <tag>       exit 0 when the crates.io index cargo reads lists every
+                      decdn crate the workspace takes from it at <tag>, 3
+                      while one is missing (index lag), 1 when it cannot
+                      answer
     rewrite <tag> [--exact]
                       point decdn-e2e at <tag>, and the crates.io
                       requirements at its caret range; with --exact, at
@@ -72,7 +73,9 @@ from check_decdn_pin import (  # noqa: E402
 )
 
 RELEASES_API = "https://api.github.com/repos/decdn/decdn/releases/latest"
-CRATES_API = "https://crates.io/api/v1/crates"
+# The sparse index cargo itself resolves from: the crates.io API can serve a
+# release before it does.
+CRATES_INDEX = "https://index.crates.io"
 USER_AGENT = "decdn-sponsord-bump-decdn (https://github.com/decdn/sponsord)"
 NOT_READY = 3
 
@@ -170,14 +173,25 @@ def latest() -> str:
     return tag
 
 
+def index_url(name: str) -> str:
+    """The sparse-index file of crate <name> (crates.io's directory layout)."""
+    if len(name) <= 2:
+        return f"{CRATES_INDEX}/{len(name)}/{name}"
+    if len(name) == 3:
+        return f"{CRATES_INDEX}/3/{name[0]}/{name}"
+    return f"{CRATES_INDEX}/{name[:2]}/{name[2:4]}/{name}"
+
+
 def ready(repo_root: Path, tag: str) -> list[str]:
-    """The decdn crates crates.io does not serve at <tag>; empty when ready.
+    """The decdn crates the crates.io index does not list at <tag>; empty when ready.
 
-    Those are the crates.io decdn dependencies and the [patch] entries.
+    Those are the crates.io decdn dependencies and the [patch] entries. The
+    index is what `cargo update` reads, so once this is empty, a failing
+    update is a real failure, not lag.
 
-    Only a 404 counts as missing: that is index lag, which a wait outlasts.
-    Any other answer, or none, is a BumpError, so that a permanent failure is
-    not reported as "try again later".
+    Only a missing version (or crate, a 404) counts as missing: that is index
+    lag, which a wait outlasts. Any other answer, or none, is a BumpError, so
+    that a permanent failure is not reported as "try again later".
     """
     version = version_of(tag)
     root = manifest(repo_root)
@@ -186,15 +200,22 @@ def ready(repo_root: Path, tag: str) -> list[str]:
         raise BumpError("Cargo.toml takes no decdn crate from crates.io")
     missing = []
     for name in sorted(registry.keys() | decdn_patch(root).keys()):
-        url = f"{CRATES_API}/{name}/{version}"
+        url = index_url(name)
         try:
-            status, _ = fetch(url)
+            status, body = fetch(url)
         except OSError as e:
-            raise BumpError(f"{name} {version}: crates.io unreachable: {e}") from None
+            raise BumpError(f"{name} {version}: crates.io index unreachable: {e}") from None
         if status == 404:
             missing.append(f"{name} {version}")
-        elif status != 200:
+            continue
+        if status != 200:
             raise BumpError(f"{name} {version}: GET {url}: HTTP {status}")
+        try:
+            listed = {json.loads(line)["vers"] for line in body.decode().splitlines() if line.strip()}
+        except (ValueError, KeyError, TypeError) as e:
+            raise BumpError(f"{name}: GET {url}: not an index file: {e}") from None
+        if version not in listed:
+            missing.append(f"{name} {version}")
     return missing
 
 
@@ -500,11 +521,11 @@ def main(argv: list[str]) -> int:
         elif command == "ready" and len(args) == 1:
             missing = ready(repo_root, args[0])
             if missing:
-                print(f"crates.io does not serve {args[0]} yet:", file=sys.stderr)
+                print(f"the crates.io index does not list {args[0]} yet:", file=sys.stderr)
                 for m in missing:
                     print(f"  {m}", file=sys.stderr)
                 return NOT_READY
-            print(f"crates.io serves every decdn crate at {args[0]}")
+            print(f"the crates.io index lists every decdn crate at {args[0]}")
         elif command == "rewrite" and args and args[1:] in ([], ["--exact"]):
             exact = args[1:] == ["--exact"]
             names = rewrite(repo_root, args[0], exact=exact)

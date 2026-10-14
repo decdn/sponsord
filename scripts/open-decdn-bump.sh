@@ -22,8 +22,8 @@
 #
 # Exit: 0 done or nothing to do; 1 error (no PR opened unless the output says
 # so), or the PR is open but the new lock fails `cargo metadata --locked` /
-# check-decdn-pin.sh; 2 usage; 3 crates.io does not serve the release yet (run
-# it again later).
+# check-decdn-pin.sh; 2 usage; 3 the crates.io index does not list the
+# release yet (run it again later).
 set -euo pipefail
 
 DECDN=decdn/decdn
@@ -123,16 +123,17 @@ if [[ -n "$existing" ]]; then
 fi
 
 # publish-crates.sh runs this right after its uploads, and the crates.io index
-# can trail them by minutes.
+# can trail them by minutes. `ready` reads that index, the one `cargo update`
+# resolves from, so a failing update below is a real failure, not lag.
 attempt=1
 until bump ready "$TAG"; do
   rc=$?
   (( rc == 3 )) || die "could not check crates.io for decdn $TAG; no PR opened"
   if (( attempt >= READY_ATTEMPTS )); then
-    echo "crates.io does not serve decdn $TAG yet; run this again later" >&2
+    echo "the crates.io index does not list decdn $TAG yet; run this again later" >&2
     exit 3
   fi
-  echo "    waiting ${READY_INTERVAL}s for crates.io (attempt $attempt/$READY_ATTEMPTS)" >&2
+  echo "    waiting ${READY_INTERVAL}s for the crates.io index (attempt $attempt/$READY_ATTEMPTS)" >&2
   sleep "$READY_INTERVAL"
   attempt=$((attempt + 1))
 done
@@ -150,23 +151,8 @@ bump rewrite "$TAG" --exact || die "could not point the decdn dependencies at $T
 crates=$(bump locked-crates) || die "could not list the locked decdn crates; no PR opened"
 [[ -n "$crates" ]] || die "Cargo.lock holds no decdn crate; no PR opened"
 mapfile -t CRATES <<<"$crates"
-# The API `ready` asks can answer before the index cargo reads serves the
-# release; cargo then cannot select it. Wait that out like `ready`, and treat
-# any other failure as an error.
-attempt=1
-until out=$(cargo update --quiet "${CRATES[@]/#/--package=}" 2>&1); do
-  if ! grep -qE 'failed to select a version|patch .decdn-[a-z0-9-]+. version mismatch' <<<"$out"; then
-    printf '%s\n' "$out" >&2
-    die "cargo update to decdn $TAG failed; no PR opened"
-  fi
-  if (( attempt >= READY_ATTEMPTS )); then
-    echo "the crates.io index does not serve decdn $TAG yet; run this again later" >&2
-    exit 3
-  fi
-  echo "    waiting ${READY_INTERVAL}s for the crates.io index (attempt $attempt/$READY_ATTEMPTS)" >&2
-  sleep "$READY_INTERVAL"
-  attempt=$((attempt + 1))
-done
+cargo update --quiet "${CRATES[@]/#/--package=}" ||
+  die "cargo update to decdn $TAG failed; no PR opened"
 bump rewrite "$TAG" || die "could not restore the caret requirements; no PR opened"
 bump changelog "$TAG" || die "could not add the changelog entries; no PR opened"
 NEW_SHA=$(bump locked-sha) || die "could not read the new locked decdn commit"

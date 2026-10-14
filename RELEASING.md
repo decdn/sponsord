@@ -128,13 +128,13 @@ scripts/open-decdn-bump.sh --dry-run  # print the diff, push nothing
 ```
 
 It works in a temporary worktree at `origin/main`, so your checkout and
-branch stay as they are. It checks crates.io up to 10 times, a minute apart,
-until it serves every decdn crate the workspace takes from there. Then it
-moves decdn-e2e's tag, pins the requirements to `=<version>` while it runs
-`cargo update` on every decdn crate (so each moves to exactly that release,
-not to crates.io's newest), waits the same way while the crates.io index
-cargo reads trails the API, and sets the requirements back to their caret
-range, moved when the release leaves it (0.1 to 0.2). It pushes
+branch stay as they are. It checks the crates.io index (the one cargo
+resolves from) up to 10 times, a minute apart, until it lists every decdn
+crate the workspace takes from there. Then it moves decdn-e2e's tag, pins the
+requirements to `=<version>` while it runs `cargo update` on every decdn
+crate (so each moves to exactly that release, not to crates.io's newest), and
+sets the requirements back to their caret range, moved when the release
+leaves it (0.1 to 0.2). It pushes
 `bump/decdn-v<version>` and opens `build: pin decdn to v<version>`.
 The commit adds a changelog entry to every crate the move reaches, replacing
 an unreleased one from an earlier bump
@@ -148,7 +148,7 @@ closed bump PR is never reopened, so close one to skip that release. When
 `cargo metadata --locked` or `check-decdn-pin.sh` fails on the new lock, it
 still opens the PR, says so in the body, and exits 1. Any other exit 1
 opened no PR, and the last line says which step failed. Exit 3 means
-crates.io, or its index, does not serve the release yet; run it again later.
+the crates.io index does not list the release yet; run it again later.
 
 Dependabot leaves the decdn crates alone (`.github/dependabot.yml`), since it
 would move the lock without the e2e tag.

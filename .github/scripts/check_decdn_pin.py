@@ -95,7 +95,14 @@ def decdn_deps(manifest: dict) -> tuple[dict[str, str], dict[str, dict], list[st
     git: dict[str, dict] = {}
     errors: list[str] = []
     for name, spec in deps.items():
-        if isinstance(spec, dict) and is_decdn_git(spec.get("git", "")):
+        package = str(spec.get("package", name)) if isinstance(spec, dict) else name
+        if package != name and (package.startswith("decdn-") or name.startswith("decdn-")):
+            # Classified by key below, a renamed alias would escape every check.
+            errors.append(
+                f"Cargo.toml: {name} renames {package} — name decdn crates by their own "
+                "name in [workspace.dependencies]"
+            )
+        elif isinstance(spec, dict) and is_decdn_git(spec.get("git", "")):
             git[name] = spec
         elif isinstance(spec, dict) and str(spec.get("path", "")).startswith("../decdn/"):
             errors.append(

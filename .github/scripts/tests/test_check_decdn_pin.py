@@ -244,6 +244,16 @@ def test_the_real_repository_passes():
 # ---- what escapes [workspace.dependencies] -------------------------------
 
 
+@pytest.mark.parametrize("alias", [
+    'client = { package = "decdn-client", version = "0.1.3" }',
+    f'e2e = {{ package = "decdn-e2e", git = "{GIT}", branch = "main" }}',
+])
+def test_renamed_workspace_alias_is_an_error(tmp_path, alias):
+    # Classified by key, it would escape every check on the decdn crates.
+    errs = errors(build(tmp_path, extra_alias=alias))
+    assert any("renames" in e for e in errs), errs
+
+
 def test_member_declaring_a_decdn_git_dependency_itself_is_an_error(tmp_path):
     repo = build(tmp_path, member_deps="[dependencies]\ndecdn-client.workspace = true\n"
                  f'[dev-dependencies]\ndecdn-e2e = {{ git = "{GIT}", branch = "main" }}\n')
