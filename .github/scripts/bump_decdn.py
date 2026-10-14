@@ -1,26 +1,35 @@
 #!/usr/bin/env python3
 """Move the decdn pin to a decdn release, for open-decdn-bump.sh.
 
-The decdn crates are git dependencies on github.com/decdn/decdn at a release
-`tag` (RELEASING.md § Pinning decdn). A bump PR changes three things: the
-`tag` and `version` on every decdn alias in the root Cargo.toml, the decdn
-packages in Cargo.lock (`cargo update`), and a changelog entry in every
-published crate the bump reaches. open-decdn-bump.sh runs `cargo update`
-and opens the PR; this script does the rest, one subcommand per step:
+The decdn crates come from crates.io at a caret requirement, and decdn-e2e
+from github.com/decdn/decdn at the matching release `tag`
+(RELEASING.md § Pinning decdn). A bump PR changes three things: the decdn-e2e
+`tag` in the root Cargo.toml (and the requirements, when the release leaves
+their caret range), the decdn packages in Cargo.lock (`cargo update`), and a
+changelog entry in every published crate the bump reaches.
+open-decdn-bump.sh runs `cargo update` and opens the PR; this script does the
+rest, one subcommand per step:
 
     latest            decdn's latest published release tag
-    pinned            the tag every decdn alias names (empty when they
-                      name a branch, a rev or different tags)
+    pinned            v<the crates.io decdn version Cargo.lock holds> (empty
+                      when it holds none, or several)
     compare <tag>     where the pin stands against <tag>, by SemVer
                       precedence: same, behind, ahead, or untagged when
                       `pinned` is empty
-    ready <tag>       exit 0 when crates.io serves every versioned alias at
-                      <tag>, 3 while it answers that one is missing (index
-                      lag), 1 when it cannot answer
-    rewrite <tag>     point every decdn alias at <tag>
+    ready <tag>       exit 0 when crates.io serves every decdn crate the
+                      workspace takes from it at <tag>, 3 while it answers
+                      that one is missing (index lag), 1 when it cannot answer
+    rewrite <tag>     point decdn-e2e at <tag>, and the crates.io
+                      requirements at its caret range
     changelog <tag>   add the bump entry under [Unreleased], naming the
-                      commit Cargo.lock pins
-    locked-sha        the decdn commit Cargo.lock pins
+                      commit Cargo.lock pins decdn-e2e at
+    locked-sha        the decdn commit Cargo.lock pins decdn-e2e at
+    locked-crates     every decdn crate in Cargo.lock, one per line, for
+                      `cargo update -p`
+    canary <version>  move the manifest onto decdn's `main` branch, whose
+                      workspace version is <version> (ci.yml's decdn main
+                      canary): every decdn crate from git `main`, through a
+                      [patch.crates-io]
 
 Run: .github/scripts/bump-decdn.sh <subcommand> [args]
 """
@@ -47,8 +56,12 @@ from check_decdn_pin import (  # noqa: E402
     DECDN_GIT,
     DEP_TABLES,
     EXACT_VERSION,
-    LOCK_SOURCE,
-    decdn_aliases,
+    caret,
+    decdn_deps,
+    decdn_patch,
+    is_decdn_git,
+    locked_decdn,
+    requirement,
 )
 
 RELEASES_API = "https://api.github.com/repos/decdn/decdn/releases/latest"
@@ -56,9 +69,13 @@ CRATES_API = "https://crates.io/api/v1/crates"
 USER_AGENT = "decdn-sponsord-bump-decdn (https://github.com/decdn/sponsord)"
 NOT_READY = 3
 
-# An alias line in [workspace.dependencies], as the decdn main canary in
-# ci.yml matches it.
-ALIAS_LINE = re.compile(r'^(decdn-[a-z0-9-]+) = \{ git = "' + re.escape(DECDN_GIT) + r'"')
+# The lines `rewrite` and `canary` edit, in [workspace.dependencies] and the
+# [patch] on the decdn repository: a git alias, a bare requirement, and an
+# inline table without a git or path source.
+SECTION = re.compile(r"^\[(?P<name>[^\]]+)\]")
+GIT_LINE = re.compile(r'^(decdn-[a-z0-9-]+) = \{ git = "' + re.escape(DECDN_GIT) + r'"')
+REQ_LINE = re.compile(r'^(?P<head>decdn-[a-z0-9-]+ = ")[^"]*(?P<tail>")')
+TABLE_LINE = re.compile(r"^decdn-[a-z0-9-]+ = \{")
 REF_FIELD = re.compile(r'\b(?:tag|rev|branch) = "[^"]*"')
 VERSION_FIELD = re.compile(r'\bversion = "[^"]*"')
 
@@ -94,12 +111,15 @@ def manifest(repo_root: Path) -> dict:
     return tomllib.loads((repo_root / "Cargo.toml").read_text())
 
 
+def lock(repo_root: Path) -> dict:
+    return tomllib.loads((repo_root / "Cargo.lock").read_text())
+
+
 def pinned_tag(repo_root: Path) -> str | None:
-    """The tag every decdn alias names, or None when they name anything else."""
-    aliases, _ = decdn_aliases(manifest(repo_root))
-    tags = {spec.get("tag") for spec in aliases.values()}
-    if len(tags) == 1:
-        return next(iter(tags))
+    """v<the crates.io decdn version Cargo.lock holds>, or None for none or several."""
+    versions = set(locked_decdn(lock(repo_root))[0].values())
+    if len(versions) == 1:
+        return f"v{next(iter(versions))}"
     return None
 
 
@@ -146,18 +166,21 @@ def latest() -> str:
 
 
 def ready(repo_root: Path, tag: str) -> list[str]:
-    """The versioned aliases crates.io does not serve at <tag>; empty when ready.
+    """The decdn crates crates.io does not serve at <tag>; empty when ready.
+
+    Those are the crates.io decdn dependencies and the [patch] entries.
 
     Only a 404 counts as missing: that is index lag, which a wait outlasts.
     Any other answer, or none, is a BumpError, so that a permanent failure is
     not reported as "try again later".
     """
     version = version_of(tag)
-    aliases, _ = decdn_aliases(manifest(repo_root))
-    if not aliases:
-        raise BumpError(f"Cargo.toml has no decdn alias on {DECDN_GIT}")
+    root = manifest(repo_root)
+    registry, _, _ = decdn_deps(root)
+    if not registry:
+        raise BumpError("Cargo.toml takes no decdn crate from crates.io")
     missing = []
-    for name in sorted(n for n, spec in aliases.items() if "version" in spec):
+    for name in sorted(registry.keys() | decdn_patch(root).keys()):
         url = f"{CRATES_API}/{name}/{version}"
         try:
             status, _ = fetch(url)
@@ -170,60 +193,151 @@ def ready(repo_root: Path, tag: str) -> list[str]:
     return missing
 
 
-def rewrite(repo_root: Path, tag: str) -> list[str]:
-    """Point every decdn alias at <tag>; returns the rewritten alias names."""
-    version = version_of(tag)
+def in_decdn_section(header: str) -> bool:
+    """Whether a table header is [workspace.dependencies] or the decdn [patch]."""
+    if header == "workspace.dependencies":
+        return True
+    url = header.removeprefix("patch.").strip('"')
+    return header.startswith("patch.") and is_decdn_git(url)
+
+
+def edit_lines(repo_root: Path, edit) -> None:
+    """Rewrite Cargo.toml line by line: edit(header, line) -> new line(s)."""
     path = repo_root / "Cargo.toml"
-    lines = path.read_text().splitlines(keepends=True)
-    rewritten = []
-    for i, line in enumerate(lines):
-        alias = ALIAS_LINE.match(line)
-        if not alias:
-            continue
-        line, refs = REF_FIELD.subn(f'tag = "{tag}"', line)
-        if refs != 1:
-            raise BumpError(f"Cargo.toml: {alias[1]} names {refs} git refs, expected one")
-        lines[i] = VERSION_FIELD.sub(f'version = "{version}"', line)
-        rewritten.append(alias[1])
-    path.write_text("".join(lines))
+    header = ""
+    out = []
+    for line in path.read_text().splitlines(keepends=True):
+        if section := SECTION.match(line):
+            header = section["name"].strip()
+        out.append(edit(header, line))
+    path.write_text("".join(out))
+
+
+def set_requirement(line: str, req: str) -> str:
+    """<line> with its crates.io requirement set to <req>; others unchanged."""
+    if match := REQ_LINE.match(line):
+        return f"{match['head']}{req}{match['tail']}{line[match.end():]}"
+    if TABLE_LINE.match(line) and "git =" not in line and "path =" not in line:
+        return VERSION_FIELD.sub(f'version = "{req}"', line)
+    return line
+
+
+def rewrite(repo_root: Path, tag: str) -> list[str]:
+    """Point decdn-e2e at <tag> and the requirements at its caret range.
+
+    Returns the names of the git aliases moved. The requirements change only
+    when <tag> leaves their range (0.1 -> 0.2): within it, `cargo update`
+    alone moves the lock.
+    """
+    version = version_of(tag)
+    req = caret(version)
+    moved: list[str] = []
+
+    def edit(header: str, line: str) -> str:
+        if not in_decdn_section(header):
+            return line
+        if (alias := GIT_LINE.match(line)) and header == "workspace.dependencies":
+            line, refs = REF_FIELD.subn(f'tag = "{tag}"', line)
+            if refs != 1:
+                raise BumpError(f"Cargo.toml: {alias[1]} names {refs} git refs, expected one")
+            moved.append(alias[1])
+            return VERSION_FIELD.sub(f'version = "{version}"', line)
+        return set_requirement(line, req)
+
+    edit_lines(repo_root, edit)
 
     # The line match is a convenience; the parsed manifest is the proof.
-    aliases, _ = decdn_aliases(manifest(repo_root))
-    if not aliases:
-        raise BumpError(f"Cargo.toml has no decdn alias on {DECDN_GIT}")
+    root = manifest(repo_root)
+    registry, git, _ = decdn_deps(root)
+    if not registry:
+        raise BumpError("Cargo.toml takes no decdn crate from crates.io")
     stale = sorted(
-        name
-        for name, spec in aliases.items()
-        if spec.get("tag") != tag
-        or "branch" in spec
-        or "rev" in spec
-        or spec.get("version", version) != version
+        [n for n, r in registry.items() if r != req]
+        + [f"[patch] {n}" for n, spec in decdn_patch(root).items() if requirement(spec) != req]
+        + [
+            n
+            for n, spec in git.items()
+            if spec.get("tag") != tag
+            or "branch" in spec
+            or "rev" in spec
+            or spec.get("version", version) != version
+        ]
     )
     if stale:
         raise BumpError(
-            f"Cargo.toml: {', '.join(stale)} not rewritten to {tag} — each decdn alias "
-            'must sit on one line, as `decdn-x = { git = "…", tag = "…", … }`'
+            f"Cargo.toml: {', '.join(stale)} not rewritten to {tag} — each decdn entry "
+            'must sit on one line, as `decdn-x = "0.1"` or '
+            '`decdn-x = { git = "…", tag = "…", … }`'
         )
-    return rewritten
+    return moved
+
+
+def canary(repo_root: Path, version: str) -> list[str]:
+    """Move every decdn crate onto decdn's `main`, at workspace version <version>.
+
+    decdn-e2e moves to `branch = "main"`; the [patch] that folds its decdn
+    dependencies onto crates.io gives way to a [patch.crates-io] that takes
+    every decdn crate from `main` instead; the requirements move to the caret
+    range of <version>. Returns the crates the [patch.crates-io] names.
+    """
+    if not EXACT_VERSION.match(version):
+        raise BumpError(f"{version!r} is not a version (X.Y.Z)")
+    root = manifest(repo_root)
+    if "crates-io" in root.get("patch", {}):
+        raise BumpError("Cargo.toml already has a [patch.crates-io]")
+    registry, git, _ = decdn_deps(root)
+    if not registry:
+        raise BumpError("Cargo.toml takes no decdn crate from crates.io")
+    names = sorted(registry.keys() | decdn_patch(root).keys())
+    req = caret(version)
+
+    def edit(header: str, line: str) -> str:
+        if header.startswith("patch.") and in_decdn_section(header):
+            return ""
+        if header != "workspace.dependencies":
+            return line
+        if GIT_LINE.match(line):
+            return REF_FIELD.sub('branch = "main"', line)
+        return set_requirement(line, req)
+
+    edit_lines(repo_root, edit)
+    path = repo_root / "Cargo.toml"
+    text = path.read_text().rstrip("\n") + "\n\n[patch.crates-io]\n"
+    text += "".join(f'{n} = {{ git = "{DECDN_GIT}", branch = "main" }}\n' for n in names)
+    path.write_text(text)
+
+    root = manifest(repo_root)
+    registry, git, _ = decdn_deps(root)
+    patched = root.get("patch", {}).get("crates-io", {})
+    if (
+        decdn_patch(root)
+        or any(r != req for r in registry.values())
+        or any(spec.get("branch") != "main" for spec in git.values())
+        or sorted(patched) != names
+    ):
+        raise BumpError(f"Cargo.toml: could not move every decdn crate to main ({version})")
+    return names
 
 
 def locked_sha(repo_root: Path) -> str:
-    """The one decdn commit Cargo.lock pins."""
-    lock = tomllib.loads((repo_root / "Cargo.lock").read_text())
-    commits = set()
-    for package in lock.get("package", []):
-        source = LOCK_SOURCE.match(str(package.get("source", "")))
-        if source and source["url"].rstrip("/").removesuffix(".git") == DECDN_GIT:
-            commits.add(source["sha"])
+    """The one decdn commit Cargo.lock pins decdn-e2e and its git crates at."""
+    commits = set(locked_decdn(lock(repo_root))[1].values())
     if len(commits) != 1:
         raise BumpError(f"Cargo.lock pins decdn at {len(commits)} commits, expected one")
     return next(iter(commits))
 
 
+def locked_crates(repo_root: Path) -> list[str]:
+    """Every decdn crate Cargo.lock holds, from crates.io or git."""
+    registry, git = locked_decdn(lock(repo_root))
+    return sorted(registry.keys() | git.keys())
+
+
 def reached_crates(repo_root: Path) -> list[Path]:
     """Directories of the published members that depend on decdn outside dev-deps."""
     root = manifest(repo_root)
-    aliases, _ = decdn_aliases(root)
+    registry, git, _ = decdn_deps(root)
+    decdn = registry.keys() | git.keys()
     kept_tables = [t for t in DEP_TABLES if t != "dev-dependencies"]
     reached = []
     for rel in root.get("workspace", {}).get("members", []):
@@ -233,7 +347,7 @@ def reached_crates(repo_root: Path) -> list[Path]:
         tables = [member.get(t, {}) for t in kept_tables]
         for target in member.get("target", {}).values():
             tables.extend(target.get(t, {}) for t in kept_tables)
-        if any(name in aliases for deps in tables for name in deps):
+        if any(name in decdn for deps in tables for name in deps):
             reached.append(repo_root / rel)
     return reached
 
@@ -241,8 +355,9 @@ def reached_crates(repo_root: Path) -> list[Path]:
 def entry(tag: str, sha: str) -> str:
     version = version_of(tag)
     text = (
-        f"**decdn {tag}.** The decdn crates are locked at decdn's `{tag}` release "
-        f"tag (`{sha}`) and require `{version}`, which is on crates.io."
+        f"**decdn {tag}.** The decdn crates are locked at `{version}` from crates.io "
+        f"and require `{caret(version)}`; the anvil fixtures at decdn's `{tag}` "
+        f"release tag (`{sha}`)."
     )
     return textwrap.fill(
         text,
@@ -352,7 +467,7 @@ def main(argv: list[str]) -> int:
             print(f"crates.io serves every decdn crate at {args[0]}")
         elif command == "rewrite" and len(args) == 1:
             names = rewrite(repo_root, args[0])
-            print(f"pinned {', '.join(names)} to {args[0]}")
+            print(f"pinned the decdn crates to {caret(version_of(args[0]))}, {', '.join(names) or 'no git alias'} to {args[0]}")
         elif command == "changelog" and len(args) == 1:
             for path in changelog(repo_root, args[0]):
                 print(f"updated {path.relative_to(repo_root)}")
@@ -360,6 +475,11 @@ def main(argv: list[str]) -> int:
             print(pinned_tag(repo_root) or "")
         elif command == "locked-sha" and not args:
             print(locked_sha(repo_root))
+        elif command == "locked-crates" and not args:
+            print("\n".join(locked_crates(repo_root)))
+        elif command == "canary" and len(args) == 1:
+            names = canary(repo_root, args[0])
+            print(f"took {', '.join(names)} from decdn main ({args[0]})")
         else:
             print(__doc__, file=sys.stderr)
             return 2

@@ -140,8 +140,14 @@ done
 
 echo "==> Pinning decdn $TAG (from ${CURRENT:-a non-tag ref})"
 OLD_SHA=$(bump locked-sha) || die "could not read the locked decdn commit"
-bump rewrite "$TAG" || die "could not point the decdn aliases at $TAG; no PR opened"
-cargo update --quiet -p decdn-client -p decdn-common -p decdn-incentive -p decdn-e2e ||
+bump rewrite "$TAG" || die "could not point the decdn dependencies at $TAG; no PR opened"
+# Every decdn crate the lock holds, so that none stays behind on the old
+# release. Within the caret range this takes crates.io's newest, which is $TAG
+# unless a later release is already out; check-decdn-pin.sh below catches that.
+crates=$(bump locked-crates) || die "could not list the locked decdn crates; no PR opened"
+[[ -n "$crates" ]] || die "Cargo.lock holds no decdn crate; no PR opened"
+mapfile -t CRATES <<<"$crates"
+cargo update --quiet "${CRATES[@]/#/--package=}" ||
   die "cargo update to decdn $TAG failed; no PR opened"
 bump changelog "$TAG" || die "could not add the changelog entries; no PR opened"
 NEW_SHA=$(bump locked-sha) || die "could not read the new locked decdn commit"
@@ -171,9 +177,9 @@ git add Cargo.toml Cargo.lock crates/*/CHANGELOG.md || die "git add failed; no P
 git commit --quiet --no-verify -F - <<EOF || die "git commit failed; no PR opened"
 build: pin decdn to ${TAG}
 
-Lock the decdn crates at decdn's ${TAG} release tag (${NEW_SHA})
-instead of ${CURRENT:-the previous pin} (${OLD_SHA}), and require ${TAG#v},
-which is on crates.io.
+Lock the decdn crates at ${TAG#v} from crates.io instead of
+${CURRENT:-the previous pin}, and the anvil fixtures (decdn-e2e) at decdn's
+${TAG} release tag (${NEW_SHA}) instead of ${OLD_SHA}.
 EOF
 # No local branch: the commit is pushed from the detached worktree. Forced,
 # because the branch may be left over from a run that pushed it and opened no
@@ -189,7 +195,7 @@ BODY=$(mktemp)
   echo "Moves the decdn pin to [decdn ${TAG}](https://github.com/${DECDN}/releases/tag/${TAG})."
   echo
   echo "- From: \`${CURRENT:-(not a tag)}\` (\`${OLD_SHA}\`)"
-  echo "- To: \`${TAG}\` (\`${NEW_SHA}\`), on crates.io"
+  echo "- To: \`${TAG}\` from crates.io; decdn-e2e at \`${NEW_SHA}\`"
   echo "- decdn changes: https://github.com/${DECDN}/compare/${OLD_SHA}...${NEW_SHA}"
   echo
   if [[ "$CHECK" != ok ]]; then

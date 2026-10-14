@@ -1,7 +1,7 @@
 """Regression tests for the decdn bump script.
 
 open-decdn-bump.sh opens its PR from what this script writes. A rewrite
-that misses an alias, or a changelog entry in the wrong crate, reaches review
+that misses an entry, or a changelog entry in the wrong crate, reaches review
 looking like a finished bump.
 """
 
@@ -40,8 +40,20 @@ UNRELEASED = """# Changelog
 """
 
 
-def build(tmp_path: Path, *, ref: str = 'tag = "v0.0.1"', version: str = "0.0.1") -> Path:
-    """A workspace with a published lib and CLI on decdn, a dev-only user and an e2e crate."""
+CRATES_IO = "registry+https://github.com/rust-lang/crates.io-index"
+PATCHED = ("decdn-client", "decdn-incentive", "decdn-protocol")
+
+
+def build(tmp_path: Path, *, version: str = "0.0.1", req: str | None = None,
+          ref: str | None = None) -> Path:
+    """A workspace with a published lib and CLI on decdn, a dev-only user and an e2e crate.
+
+    The decdn crates come from crates.io at <req> (the caret range of
+    <version>) and are locked at <version>; decdn-e2e from git at <ref>
+    (`tag = "v<version>"`).
+    """
+    req = req or bd.caret(version)
+    ref = ref or f'tag = "v{version}"'
     repo = tmp_path / "repo"
     members = {
         # name: (member Cargo.toml body after [package] name)
@@ -60,14 +72,20 @@ def build(tmp_path: Path, *, ref: str = 'tag = "v0.0.1"', version: str = "0.0.1"
         "[workspace]\n"
         f"members = [{', '.join(repr(f'crates/{m}') for m in members)}]\n\n"
         "[workspace.dependencies]\n"
-        "# decdn, at a release tag.\n"
-        f'decdn-client = {{ git = "{GIT}", {ref}, version = "{version}" }}\n'
-        f'decdn-incentive = {{ git = "{GIT}", {ref}, version = "{version}" }}\n'
+        "# decdn, from crates.io.\n"
+        f'decdn-client = "{req}"\n'
+        f'decdn-incentive = {{ version = "{req}", features = ["redb"] }}\n'
         f'decdn-e2e = {{ git = "{GIT}", {ref} }}\n'
-        'serde = "1"\n'
+        'serde = "1"\n\n'
+        f'[patch."{GIT}"]\n'
+        + "".join(f'{name} = "{req}"\n' for name in PATCHED)
+        + '\n[profile.release]\nlto = "fat"\n'
     )
     lock = ["version = 4"]
-    for name in ("decdn-client", "decdn-incentive", "decdn-e2e"):
+    for name in PATCHED:
+        lock += ["", "[[package]]", f'name = "{name}"', f'version = "{version}"',
+                 f'source = "{CRATES_IO}"']
+    for name in ("decdn-e2e", "decdn-node"):
         lock += ["", "[[package]]", f'name = "{name}"', f'version = "{version}"',
                  f'source = "git+{GIT}?tag=v{version}#{SHA}"']
     (repo / "Cargo.lock").write_text("\n".join(lock) + "\n")
@@ -89,16 +107,42 @@ def stub_fetch(monkeypatch, responses: dict[str, object]) -> None:
 # ---- rewrite -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("ref", ['tag = "v0.0.1"', 'branch = "main"', 'rev = "abc1234"'])
-def test_rewrite_moves_every_alias_and_keeps_the_rest(tmp_path, ref):
-    repo = build(tmp_path, ref=ref, version="0.0.0" if "tag" not in ref else "0.0.1")
-    names = bd.rewrite(repo, "v0.1.0")
-    assert names == ["decdn-client", "decdn-incentive", "decdn-e2e"]
+def requirements(repo: Path) -> set[str]:
+    root = bd.manifest(repo)
+    registry, _, _ = bd.decdn_deps(root)
+    return set(registry.values()) | {bd.requirement(s) for s in bd.decdn_patch(root).values()}
+
+
+def test_rewrite_within_the_caret_range_moves_only_the_e2e_tag(tmp_path):
+    repo = build(tmp_path, version="0.1.0")
+    before = (repo / "Cargo.toml").read_text()
+    assert bd.rewrite(repo, "v0.1.3") == ["decdn-e2e"]
+    after = (repo / "Cargo.toml").read_text()
+    assert after == before.replace('tag = "v0.1.0"', 'tag = "v0.1.3"')
+
+
+@pytest.mark.parametrize(("version", "tag", "req"), [
+    ("0.1.0", "v0.2.0", "0.2"),
+    ("0.9.1", "v1.0.0", "1"),
+    ("0.1.0", "v0.2.0-rc.1", "0.2.0-rc.1"),
+    ("0.2.0-rc.1", "v0.2.0", "0.2"),
+])
+def test_rewrite_across_the_caret_range_moves_every_requirement(tmp_path, version, tag, req):
+    repo = build(tmp_path, version=version)
+    bd.rewrite(repo, tag)
+    assert requirements(repo) == {req}
     text = (repo / "Cargo.toml").read_text()
-    assert text.count('tag = "v0.1.0"') == 3
-    assert text.count('version = "0.1.0"') == 2  # decdn-e2e stays version-less
-    assert "# decdn, at a release tag.\n" in text
-    assert 'serde = "1"\n' in text
+    assert f'decdn-e2e = {{ git = "{GIT}", tag = "{tag}" }}' in text
+    assert 'features = ["redb"]' in text
+    assert "# decdn, from crates.io.\n" in text
+    assert 'serde = "1"\n' in text and 'lto = "fat"' in text
+
+
+@pytest.mark.parametrize("ref", ['branch = "main"', 'rev = "abc1234"'])
+def test_rewrite_puts_e2e_back_on_a_tag(tmp_path, ref):
+    repo = build(tmp_path, ref=ref)
+    bd.rewrite(repo, "v0.1.0")
+    assert f'decdn-e2e = {{ git = "{GIT}", tag = "v0.1.0" }}' in (repo / "Cargo.toml").read_text()
 
 
 def test_rewrite_refuses_a_non_release_tag(tmp_path):
@@ -109,23 +153,61 @@ def test_rewrite_refuses_a_non_release_tag(tmp_path):
     assert (repo / "Cargo.toml").read_text() == before
 
 
-def test_rewrite_fails_on_an_alias_it_cannot_see(tmp_path):
+def test_rewrite_fails_on_an_entry_it_cannot_see(tmp_path):
     repo = build(tmp_path)
     manifest = repo / "Cargo.toml"
     # A multi-line alias parses fine but escapes the line match.
     manifest.write_text(manifest.read_text().replace(
-        f'decdn-e2e = {{ git = "{GIT}", tag = "v0.0.1" }}',
-        f'[workspace.dependencies.decdn-e2e]\ngit = "{GIT}"\ntag = "v0.0.1"',
-    ).replace('serde = "1"\n', ""))
+        f'decdn-e2e = {{ git = "{GIT}", tag = "v0.0.1" }}\nserde = "1"\n',
+        f'serde = "1"\n\n[workspace.dependencies.decdn-e2e]\ngit = "{GIT}"\ntag = "v0.0.1"\n',
+    ))
     with pytest.raises(bd.BumpError, match="decdn-e2e not rewritten"):
         bd.rewrite(repo, "v0.1.0")
 
 
-def test_rewrite_fails_without_any_alias(tmp_path):
+def test_rewrite_leaves_other_tables_alone(tmp_path):
+    repo = build(tmp_path)
+    manifest = repo / "Cargo.toml"
+    manifest.write_text(manifest.read_text() + '\n[patch.other]\ndecdn-client = "9"\n')
+    bd.rewrite(repo, "v0.2.0")
+    assert '[patch.other]\ndecdn-client = "9"\n' in manifest.read_text()
+
+
+def test_rewrite_fails_without_any_crates_io_decdn_dependency(tmp_path):
     repo = build(tmp_path)
     (repo / "Cargo.toml").write_text('[workspace]\nmembers = []\n[workspace.dependencies]\n')
-    with pytest.raises(bd.BumpError, match="no decdn alias"):
+    with pytest.raises(bd.BumpError, match="no decdn crate from crates.io"):
         bd.rewrite(repo, "v0.1.0")
+
+
+# ---- canary --------------------------------------------------------------
+
+
+def test_canary_takes_every_decdn_crate_from_main(tmp_path):
+    repo = build(tmp_path, version="0.1.0")
+    assert bd.canary(repo, "0.2.0") == sorted(PATCHED)
+    root = bd.manifest(repo)
+    registry, git, _ = bd.decdn_deps(root)
+    assert set(registry.values()) == {"0.2"}
+    assert git == {"decdn-e2e": {"git": GIT, "branch": "main"}}
+    assert bd.decdn_patch(root) == {}
+    assert root["patch"]["crates-io"] == {
+        name: {"git": GIT, "branch": "main"} for name in PATCHED
+    }
+    assert root["profile"]["release"] == {"lto": "fat"}
+
+
+def test_canary_refuses_a_second_crates_io_patch(tmp_path):
+    repo = build(tmp_path)
+    manifest = repo / "Cargo.toml"
+    manifest.write_text(manifest.read_text() + '\n[patch.crates-io]\nfoo = { path = "x" }\n')
+    with pytest.raises(bd.BumpError, match="already has"):
+        bd.canary(repo, "0.2.0")
+
+
+def test_canary_refuses_a_non_version(tmp_path):
+    with pytest.raises(bd.BumpError, match="not a version"):
+        bd.canary(build(tmp_path), "main")
 
 
 # ---- changelog -----------------------------------------------------------
@@ -145,9 +227,9 @@ def test_changelog_entry_opens_a_changed_section(tmp_path):
     text = (repo / "crates/lib/CHANGELOG.md").read_text()
     assert text.startswith(
         "# Changelog\n\n## [Unreleased]\n\n### Changed\n\n"
-        "- **decdn v0.0.1.** The decdn crates are locked at decdn's `v0.0.1` release tag\n"
-        f"  (`{SHA}`) and require `0.0.1`, which is on\n"
-        "  crates.io.\n\n## [0.0.1] - 2026-10-09\n"
+        "- **decdn v0.0.1.** The decdn crates are locked at `0.0.1` from crates.io and\n"
+        "  require `0.0.1`; the anvil fixtures at decdn's `v0.0.1` release tag\n"
+        f"  (`{SHA}`).\n\n## [0.0.1] - 2026-10-09\n"
     )
     assert all(len(line) <= 80 for line in text.splitlines())
 
@@ -208,7 +290,7 @@ def test_changelog_opens_changed_at_the_end_of_unreleased():
     existing = UNRELEASED.replace("## [Unreleased]\n", "## [Unreleased]\n\n### Added\n\n- New.\n")
     unreleased = bd.add_entry(existing, "v0.1.0", SHA).split("## [0.0.1]")[0]
     assert unreleased.index("### Added") < unreleased.index("### Changed")
-    assert unreleased.endswith("crates.io.\n\n")
+    assert unreleased.endswith(f"(`{SHA}`).\n\n")
 
 
 def test_changelog_without_unreleased_heading_fails(tmp_path):
@@ -218,6 +300,7 @@ def test_changelog_without_unreleased_heading_fails(tmp_path):
 
 def test_rewritten_repo_still_passes_the_pin_check(tmp_path):
     repo = build(tmp_path, ref='branch = "main"', version="0.0.1")
+    assert check(repo)[0] != []
     bd.rewrite(repo, "v0.0.1")
     assert check(repo)[0] == []
 
@@ -227,6 +310,10 @@ def test_rewritten_repo_still_passes_the_pin_check(tmp_path):
 
 def test_locked_sha_reads_the_one_commit(tmp_path):
     assert bd.locked_sha(build(tmp_path)) == SHA
+
+
+def test_locked_crates_lists_both_sources(tmp_path):
+    assert bd.locked_crates(build(tmp_path)) == sorted([*PATCHED, "decdn-e2e", "decdn-node"])
 
 
 def test_locked_sha_refuses_two_commits(tmp_path):
@@ -240,12 +327,16 @@ def test_locked_sha_refuses_two_commits(tmp_path):
 # ---- pinned --------------------------------------------------------------
 
 
-def test_pinned_names_the_shared_tag(tmp_path):
-    assert bd.pinned_tag(build(tmp_path)) == "v0.0.1"
+def test_pinned_names_the_locked_crates_io_version(tmp_path):
+    # Not the e2e tag: the crates are what ships.
+    assert bd.pinned_tag(build(tmp_path, ref='branch = "main"')) == "v0.0.1"
 
 
-def test_pinned_is_none_off_a_tag(tmp_path):
-    assert bd.pinned_tag(build(tmp_path, ref='branch = "main"')) is None
+def test_pinned_is_none_for_mixed_versions(tmp_path):
+    repo = build(tmp_path)
+    lock = repo / "Cargo.lock"
+    lock.write_text(lock.read_text().replace('version = "0.0.1"', 'version = "0.0.2"', 1))
+    assert bd.pinned_tag(repo) is None
 
 
 # ---- latest / ready ------------------------------------------------------
@@ -275,25 +366,28 @@ def crate_url(name: str, version: str = "0.1.0") -> str:
     return f"{bd.CRATES_API}/{name}/{version}"
 
 
-def test_ready_when_crates_io_serves_every_versioned_alias(tmp_path, monkeypatch):
-    # decdn-e2e has no version and is never published; it is not asked for.
-    stub_fetch(monkeypatch, {crate_url("decdn-client"): (200, b""),
-                             crate_url("decdn-incentive"): (200, b"")})
+def served(**overrides) -> dict[str, object]:
+    """crates.io answering 200 for every crate the workspace takes from it."""
+    return {crate_url(n): overrides.get(n.replace("-", "_"), (200, b"")) for n in PATCHED}
+
+
+def test_ready_when_crates_io_serves_every_crate(tmp_path, monkeypatch):
+    # decdn-e2e is never published; it is not asked for. decdn-protocol is
+    # only in the [patch], and is.
+    stub_fetch(monkeypatch, served())
     assert bd.ready(build(tmp_path), "v0.1.0") == []
 
 
 def test_not_ready_while_crates_io_has_no_such_version(tmp_path, monkeypatch):
-    stub_fetch(monkeypatch, {crate_url("decdn-client"): (404, b""),
-                             crate_url("decdn-incentive"): (200, b"")})
-    assert bd.ready(build(tmp_path), "v0.1.0") == ["decdn-client 0.1.0"]
+    stub_fetch(monkeypatch, served(decdn_protocol=(404, b"")))
+    assert bd.ready(build(tmp_path), "v0.1.0") == ["decdn-protocol 0.1.0"]
 
 
 @pytest.mark.parametrize("response", [OSError("timed out"), (503, b""), (429, b"")])
 def test_ready_fails_when_crates_io_cannot_answer(tmp_path, monkeypatch, response):
     # Index lag is a 404 and worth waiting out; anything else is not lag, and
     # "run it again later" would hide it.
-    stub_fetch(monkeypatch, {crate_url("decdn-client"): response,
-                             crate_url("decdn-incentive"): (200, b"")})
+    stub_fetch(monkeypatch, served(decdn_client=response))
     with pytest.raises(bd.BumpError, match="decdn-client"):
         bd.ready(build(tmp_path), "v0.1.0")
 
@@ -313,12 +407,15 @@ def test_ready_fails_when_crates_io_cannot_answer(tmp_path, monkeypatch, respons
     ("v0.1.0-rc.1", "v0.1.0-alpha", "ahead"),
 ])
 def test_compare_orders_by_semver(tmp_path, pinned, tag, relation):
-    repo = build(tmp_path, ref=f'tag = "{pinned}"', version=pinned.removeprefix("v"))
+    repo = build(tmp_path, version=pinned.removeprefix("v"))
     assert bd.compare(repo, tag) == relation
 
 
-def test_compare_off_a_tag_is_untagged(tmp_path):
-    assert bd.compare(build(tmp_path, ref='branch = "main"'), "v0.1.0") == "untagged"
+def test_compare_with_mixed_versions_is_untagged(tmp_path):
+    repo = build(tmp_path)
+    lock = repo / "Cargo.lock"
+    lock.write_text(lock.read_text().replace('version = "0.0.1"', 'version = "0.0.2"', 1))
+    assert bd.compare(repo, "v0.1.0") == "untagged"
 
 
 # ---- command line --------------------------------------------------------
@@ -334,20 +431,17 @@ def cli_repo(tmp_path, monkeypatch):
 
 
 def test_main_ready_exits_0_when_served(cli_repo, monkeypatch, capsys):
-    stub_fetch(monkeypatch, {crate_url("decdn-client"): (200, b""),
-                             crate_url("decdn-incentive"): (200, b"")})
+    stub_fetch(monkeypatch, served())
     assert bd.main(["ready", "v0.1.0"]) == 0
 
 
 def test_main_ready_exits_3_while_not_served(cli_repo, monkeypatch, capsys):
-    stub_fetch(monkeypatch, {crate_url("decdn-client"): (404, b""),
-                             crate_url("decdn-incentive"): (200, b"")})
+    stub_fetch(monkeypatch, served(decdn_client=(404, b"")))
     assert bd.main(["ready", "v0.1.0"]) == bd.NOT_READY == 3
 
 
 def test_main_ready_exits_1_when_crates_io_cannot_answer(cli_repo, monkeypatch, capsys):
-    stub_fetch(monkeypatch, {crate_url("decdn-client"): OSError("no route"),
-                             crate_url("decdn-incentive"): (200, b"")})
+    stub_fetch(monkeypatch, served(decdn_client=OSError("no route")))
     assert bd.main(["ready", "v0.1.0"]) == 1
     assert "no route" in capsys.readouterr().err
 
@@ -358,7 +452,7 @@ def test_main_exits_1_on_a_bad_tag(cli_repo, capsys, argv):
     assert "not a decdn release tag" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("argv", [[], ["bogus"], ["ready"], ["latest", "v0.1.0"]])
+@pytest.mark.parametrize("argv", [[], ["bogus"], ["ready"], ["latest", "v0.1.0"], ["canary"]])
 def test_main_exits_2_on_usage(cli_repo, capsys, argv):
     assert bd.main(argv) == 2
 
@@ -373,3 +467,8 @@ def test_main_latest_prints_the_tag_alone(cli_repo, monkeypatch, capsys):
 def test_main_compare_prints_the_relation(cli_repo, capsys, tag, out):
     assert bd.main(["compare", tag]) == 0
     assert capsys.readouterr().out == f"{out}\n"
+
+
+def test_main_locked_crates_prints_one_per_line(cli_repo, capsys):
+    assert bd.main(["locked-crates"]) == 0
+    assert capsys.readouterr().out.split() == bd.locked_crates(cli_repo)
