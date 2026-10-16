@@ -10,8 +10,8 @@
 #   curl -fsSL <onramp>/decdn.sh | sh -s -- get decdn:<hash>/[<path>][?ns=<id>] [-o <dir>] [<decdn get flags>]
 #
 # The `decdn:` URI comes first. It and every argument after it go to
-# `decdn get` as given, with `-o .` added when none of them sets the output
-# directory.
+# `decdn get` as given. Without `-o`, `decdn get` picks the destination and
+# refuses to replace a file no earlier pull of the same entry left there.
 #
 # Without arguments, it only installs decdn into ~/.local/bin and checks that
 # the directory is on PATH, printing how to add it when it is not:
@@ -353,13 +353,6 @@ main() {
       die "not a bundle URI (expected decdn:<64 hex characters>/, with an optional file path after the /): $uri"
     shift 2
     # The rest go to decdn get, which checks them.
-    has_output=""
-    for arg in "$@"; do
-      case "$arg" in
-        -o* | --output | --output=*) has_output=1 ;;
-      esac
-    done
-    [ -n "$has_output" ] || set -- -o . "$@"
   fi
 
   detect_target

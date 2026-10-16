@@ -321,7 +321,7 @@ async fn get_passes_the_gate_and_runs_decdn_with_the_capability() {
 async fn every_argument_after_the_uri_reaches_decdn_as_given() {
     let fx = Fixture::new("pass_through").await;
 
-    // An output flag in any form replaces `-o .`.
+    // An output flag in any form reaches decdn as given.
     let args = [
         GET[0],
         GET[1],
@@ -332,14 +332,14 @@ async fn every_argument_after_the_uri_reaches_decdn_as_given() {
         "*.txt",
     ];
     fx.run_ok(&args, &[]).await;
-    // Without one, the bundle lands in the current directory.
+    // Without one, the script adds none: decdn get picks the destination.
     fx.run_ok(&[GET[0], GET[1], "--jobs", "8"], &[]).await;
 
     let calls = fx.calls();
     assert_eq!(calls.len(), 2, "{calls:?}");
     let expected = [
         format!("get {BUNDLE} --jobs 8 --output=out --include *.txt --capability "),
-        format!("get {BUNDLE} -o . --jobs 8 --capability "),
+        format!("get {BUNDLE} --jobs 8 --capability "),
     ];
     for (call, start) in calls.iter().zip(&expected) {
         assert!(call.starts_with(start), "{call}");

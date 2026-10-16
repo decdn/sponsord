@@ -15,6 +15,18 @@ release.
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+
+- **`decdn.sh` and `decdn.ps1` no longer add `-o .` when no output
+  directory is given.** An explicit `-o` turns off `decdn get`'s overwrite
+  guard, so the one-liner replaced any file of the same name in the current
+  directory. Without `-o`, `decdn get` now picks the destination and refuses
+  to replace a file no earlier pull of the same entry left there unchanged.
+  A bundle still downloads into `.`. Contract-breaking: one file of a
+  bundle (`decdn:<hash>/a/b.txt`) without `-o` lands at `./b.txt`, not
+  `./a/b.txt`, and the installers need a `decdn` release with an optional
+  `get -o` and the default-destination guard (decdn#2466, decdn#2476).
+
 ## [0.1.0] - 2026-10-14
 
 ### Changed (BREAKING)
