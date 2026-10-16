@@ -293,7 +293,7 @@ async fn get_passes_the_gate_and_resumes_a_failed_download_without_it() {
     for call in &calls {
         assert!(
             call.starts_with(&format!(
-                "get decdn:{HASH}/?ns=1 -o . --jobs 8 --capability dcap1:FAKE1 "
+                "get decdn:{HASH}/?ns=1 --jobs 8 --capability dcap1:FAKE1 "
             )),
             "{call}"
         );
