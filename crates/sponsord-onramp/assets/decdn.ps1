@@ -10,8 +10,8 @@
 #   & ([scriptblock]::Create((irm <onramp>/decdn.ps1))) get decdn:<hash>/[<path>][?ns=<id>] [-o <dir>] [<decdn get flags>]
 #
 # The `decdn:` URI comes first. It and every argument after it go to
-# `decdn get` as given, with `-o .` added when none of them sets the output
-# directory.
+# `decdn get` as given. Without `-o`, `decdn get` picks the destination and
+# refuses to replace a file no earlier pull of the same entry left there.
 #
 # Each download gets a throwaway key under ~\.decdn\sponsored\downloads\<hash>\
 # and a capability for it, issued once the person passes the gate in the
@@ -80,9 +80,6 @@
       $Hash = $Matches[1].ToLowerInvariant()
       # The rest go to decdn get, which checks them.
       foreach ($Arg in ($args | Select-Object -Skip 2)) { $PassArgs.Add([string]$Arg) }
-      if (-not ($PassArgs | Where-Object { $_ -cmatch '^(-o|--output(=|$))' })) {
-        $PassArgs.InsertRange(0, [string[]]@('-o', '.'))
-      }
     }
 
     $BinDir = Join-Path $env:LOCALAPPDATA 'decdn\bin'
